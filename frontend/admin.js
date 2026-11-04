@@ -73,7 +73,9 @@ export function admin(page, need) {
         h("select", { style: "width:auto", "aria-label": "Source", onchange: (e) => go({ source: e.target.value, page: 1 }) }, h("option", { value: "" }, "All sources"), ["odrs", "ndp"].map((s) => h("option", { value: s, selected: p.source === s ? true : null }, s))),
         q, h("button", { class: "ghost", onclick: () => go({ q: q.value, page: 1 }) }, "Search")),
       h("div", { style: "margin-top:.75rem" }, table(["Service", "Organization", "Source", "Result", "Checked", "Waiting", ""], d.results.map((r) => [
-        h("span", null, r.verified ? "✓ " : "", r.name), r.organization || "—", r.source, h("div", null, badge(r.category), r.summary && h("div", { class: "muted small" }, r.summary)),
+        h("span", null, r.verified ? "✓ " : "", r.name), r.organization || "—", r.source,
+        h("div", null, badge(r.category), (r.flags || []).includes("user_reported") && badge("user_reported"), r.summary && h("div", { class: "muted small" }, r.summary),
+          r.reports ? h("div", { class: "muted small" }, `${r.reports} open user report${r.reports > 1 ? "s" : ""}`) : null),
         fmtDate(r.checked_at), r.pending || "—", h("div", { class: "row" }, h("a", { class: "btn ghost sm", href: `#/admin/record/${r.id}` }, "Open"),
           h("button", { class: "ghost sm", onclick: async (e) => { e.target.disabled = true; await api("/admin/maintenance/run", { method: "POST", body: { service_id: r.id, wait: true } }); toast("Checked."); refresh(); } }, "Check now"))]),
         "No records match these filters.")), pager(d.total, pg, 25, (n) => go({ page: n })));
@@ -82,7 +84,16 @@ export function admin(page, need) {
   async function record(id) {
     const body = await recordEditor(id, { mode: "admin", onSaved: refresh });
     const r = await api(`/admin/records/${id}`);
+    const checkFlags = (() => { try { return JSON.parse(r.check?.flags || "[]"); } catch { return []; } })();
+    const openReports = (r.reports || []).filter((x) => x.status === "open");
     show(h("a", { href: "#/admin/records" }, "← Records"), h("h1", null, r.record.data.name || r.record.type), h("p", { class: "muted small" }, `${r.record.type} · source ${r.record.source} · version ${r.record.version} · updated ${fmtDate(r.record.updated_at)}`),
+      (checkFlags.includes("user_reported") || openReports.length)
+        ? h("div", { class: "card", style: "border-left:3px solid var(--tide);margin-bottom:.75rem" },
+            h("div", { class: "row" }, badge("user_reported"), h("strong", null, `${openReports.length} open user report${openReports.length === 1 ? "" : "s"}`),
+              h("a", { class: "small", href: "#/admin/reports" }, "All reports")),
+            openReports.map((x) => h("blockquote", null, x.note || h("span", { class: "muted" }, "(no note)"),
+              h("div", { class: "small muted" }, `${x.reporter_email || "a user"} · ${fmtDate(x.created_at)}`))))
+        : null,
       h("div", { class: "card" }, body));
   }
 
