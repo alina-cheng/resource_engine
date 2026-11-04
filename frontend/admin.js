@@ -23,7 +23,8 @@ export function admin(page, need) {
         h("a", { class: "card stat", href: "#/admin/records" }, h("b", null, s.counts.service || 0), "services", h("div", { class: "muted small" }, `${s.counts.organization || 0} organizations · ${s.counts.location || 0} locations`)),
         h("a", { class: "card stat", href: "#/admin/seekers" }, h("b", null, s.open_requests), "open help requests", h("div", { class: "muted small" }, `${s.seekers} help seekers · ${s.providers} provider accounts`)),
         h("a", { class: "card stat", href: "#/admin/imports" }, h("b", null, s.quarantined), "quarantined source records", h("div", { class: "muted small" }, "could not be converted to valid HSDS")),
-        h("a", { class: "card stat", href: "#/admin/documents?status=pending" }, h("b", null, s.docs_pending), "documents waiting for approval")),
+        h("a", { class: "card stat", href: "#/admin/documents?status=pending" }, h("b", null, s.docs_pending), "documents waiting for approval"),
+        h("a", { class: "card stat", href: "#/admin/reports" }, h("b", null, s.open_reports || 0), "user reports to review", h("div", { class: "muted small" }, "listings a person flagged as wrong"))),
       h("h2", { style: "margin-top:1.5rem" }, "Record health"),
       h("div", { class: "card" }, h("div", { class: "bars" }, CATS.map((c) => h("a", { class: "bar-row", href: `#/admin/records${qs({ category: c })}` }, badge(c),
         h("div", { class: "bar-track" }, h("div", { class: "bar-fill", style: `width:${((s.check_categories[c] || 0) / total) * 100}%` }), ), h("span", null, s.check_categories[c] || 0))))),
@@ -154,9 +155,27 @@ export function admin(page, need) {
         k.revoked_at ? badge("rejected") : h("button", { class: "sm danger", onclick: async () => { await api(`/admin/api-keys/${k.id}`, { method: "DELETE" }); toast("Key revoked."); refresh(); } }, "Revoke")]), "No keys yet.")));
   }
 
+  async function reports() {
+    const p = params(), status = p.status || "open";
+    const { reports } = await api(`/admin/reports${qs({ status })}`);
+    const resolve = async (id) => { try { await api(`/admin/reports/${id}/resolve`, { method: "POST" }); toast("Marked resolved."); refresh(); } catch (e) { toast(e.message); } };
+    show(h("h1", null, "User reports"),
+      h("p", { class: "muted" }, "Listings a help seeker, provider or admin flagged as wrong. Each report forces a fresh AI check of that record and raises a user_reported flag for review; approving any proposed change still happens in Review."),
+      h("div", { class: "row" }, ["open", "resolved"].map((s) => h("a", { class: "chip", href: `#/admin/reports${qs({ status: s })}`, style: status === s ? "border-color:var(--tide);background:var(--tide-l)" : "" }, LABEL[s] || s))),
+      h("div", { style: "margin-top:.75rem" }, table(["When", "Listing", "Organization", "What they reported", "From", "Status", ""], reports.map((r) => [
+        fmtDate(r.created_at),
+        h("a", { href: `#/admin/record/${r.resource_id}` }, r.resource_name),
+        r.org_name || "—",
+        r.note || h("span", { class: "muted" }, "(no note)"),
+        r.reporter_email || "—",
+        badge(r.status === "open" ? "discrepancy" : "verified"),
+        r.status === "open" ? h("button", { class: "ghost sm", onclick: () => resolve(r.id) }, "Mark resolved") : h("span", { class: "small muted" }, `by ${r.resolved_by || "—"}`),
+      ]), status === "open" ? "No open user reports." : "No resolved reports yet.")));
+  }
+
   return {
     "/admin": guard(overview), "/admin/review": guard(review), "/admin/records": guard(records), "/admin/record/:id": guard(record),
     "/admin/providers": guard(providers), "/admin/provider/:id": guard(provider), "/admin/seekers": guard(seekers), "/admin/seeker/:id": guard(seeker),
-    "/admin/imports": guard(imports), "/admin/documents": guard(documents), "/admin/keys": guard(keys),
+    "/admin/imports": guard(imports), "/admin/documents": guard(documents), "/admin/keys": guard(keys), "/admin/reports": guard(reports),
   };
 }

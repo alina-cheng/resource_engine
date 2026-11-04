@@ -15,7 +15,7 @@ function renderTop() {
   if (u?.role === "seeker") nav.push(link("#/requests", "My requests"), link("#/profile", "My profile"));
   if (u?.role === "provider") nav.push(link("#/provider", "My organization"), link("#/provider/needs", "Needs & people served"), link("#/provider/documents", "Documents"));
   if (u?.role === "admin") nav.push(link("#/admin", "Overview"), link("#/admin/review", "Review"), link("#/admin/records", "Records"), link("#/admin/providers", "Providers"),
-    link("#/admin/seekers", "Help seekers"), link("#/admin/imports", "Imports"), link("#/admin/documents", "Documents"), link("#/admin/keys", "API keys"));
+    link("#/admin/seekers", "Help seekers"), link("#/admin/reports", "Reports"), link("#/admin/imports", "Imports"), link("#/admin/documents", "Documents"), link("#/admin/keys", "API keys"));
   $("#top").replaceChildren(h("div", { class: "bar" },
     h("a", { class: "brand", href: "#/" }, h("i"), "One Degree"), h("nav", { "aria-label": "Main" }, nav),
     h("div", { class: "who" }, u ? [h("span", null, `${u.name} · ${u.role}`), h("a", { href: "#/", onclick: logout }, "Log out")]

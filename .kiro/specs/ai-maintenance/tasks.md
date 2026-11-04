@@ -5,6 +5,8 @@
 - [x] Categories and evidence-required proposals
 - [x] Page-hash skipping and single-record check
 - [x] Seeded evaluation with thresholds in tests
+- [x] Detection engine ported from the One Degree monorepo into `app/maintenance/` (grounded extractor, structured comparator, review-need hashing) behind a bridge (ADR-9)
+- [x] User-report-triggered recheck: `POST /api/reports`, forces a check, single `user_reported` flag, admin Reports view, demo data (ADR-10)
 - [ ] Live website source (built, untested)
 - [ ] Bedrock extractor evaluated on real pages
 - [ ] Labelled real-page evaluation set

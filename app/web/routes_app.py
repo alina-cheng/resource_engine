@@ -121,6 +121,21 @@ def search_directory():
     return jsonify({"results": [c.chat._card(h) for h in hits]})
 
 
+# ---------------------------------------------------------------------------------------------- user reports
+@bp.post("/reports")
+@auth_required("seeker", "provider", "admin")
+def file_report():
+    """Any signed-in user can report a listing that looks wrong. One report forces a fresh AI
+    maintenance check of that record and raises the `user_reported` flag for a specialist."""
+    c, b, p = container(), body(), g.principal
+    rid = (b.get("resource_id") or "").strip()
+    row = c.store.get(rid)
+    if not row or row["type"] != "service":
+        return err(404, "That service could not be found.")
+    r = c.maintenance.reports.file(rid, reporter_id=p.id, reporter_email=p.email, note=b.get("note"))
+    return jsonify({**r, "message": "Thanks. A specialist will review this listing."}), 201
+
+
 # ---------------------------------------------------------------------------------------------- provider
 def _own(rid: str) -> dict:
     row = container().store.get(rid)
@@ -252,7 +267,9 @@ def admin_stats():
     total_services = c.store.counts().get("service", 0)
     cats["unchecked"] = max(0, total_services - sum(cats.values()))
     pend = {r["kind"]: r["n"] for r in c.db.q("SELECT kind, COUNT(*) AS n FROM change_request WHERE status='pending' GROUP BY kind")}
+    open_reports = c.db.one("SELECT COUNT(*) AS n FROM user_report WHERE status='open'")["n"]
     return jsonify({"counts": c.store.counts(), "check_categories": cats, "pending_by_kind": pend,
+                    "open_reports": open_reports,
                     "seekers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='seeker'")["n"],
                     "providers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='provider'")["n"],
                     "open_requests": c.db.one("SELECT COUNT(*) AS n FROM help_request WHERE status='open'")["n"],
@@ -260,6 +277,29 @@ def admin_stats():
                     "quarantined": c.db.one("SELECT COUNT(*) AS n FROM quarantine")["n"],
                     "last_imports": c.db.q("SELECT * FROM import_run ORDER BY started_at DESC LIMIT 5"),
                     "last_maintenance": c.db.q("SELECT * FROM maintenance_run ORDER BY started_at DESC LIMIT 3")})
+
+
+@bp.get("/admin/reports")
+@auth_required("admin")
+def admin_reports():
+    c = container()
+    rows = c.maintenance.reports.list(status=request.args.get("status", "open"), limit=300)
+    names = c.store.get_many(list({r["resource_id"] for r in rows}))
+    for r in rows:
+        rec = names.get(r["resource_id"])
+        r["resource_name"] = _name(rec) or "service"
+        r["org_id"] = (rec or {}).get("org_id")
+        r["org_name"] = _name(c.store.get(r["org_id"])) if r.get("org_id") else None
+    return jsonify({"reports": rows})
+
+
+@bp.post("/admin/reports/<report_id>/resolve")
+@auth_required("admin")
+def admin_report_resolve(report_id):
+    c = container()
+    c.db.run("UPDATE user_report SET status='resolved', resolved_by=?, resolved_at=? WHERE id=? AND status='open'",
+             (g.principal.email, now_iso(), report_id))
+    return jsonify({"status": "resolved"})
 
 
 @bp.get("/admin/seekers")
@@ -320,7 +360,8 @@ def admin_record(rid):
     if not row:
         raise KeyError(rid)
     return jsonify({"record": row, "history": c.store.history(rid, 100), "check": c.db.one("SELECT * FROM check_result WHERE resource_id=?", (rid,)),
-                    "change_requests": _enrich_crs(c.proposals.list(resource_id=rid, limit=30))})
+                    "change_requests": _enrich_crs(c.proposals.list(resource_id=rid, limit=30)),
+                    "reports": c.db.q("SELECT * FROM user_report WHERE resource_id=? ORDER BY created_at DESC LIMIT 50", (rid,))})
 
 
 @bp.put("/admin/records/<rid>")
@@ -378,16 +419,19 @@ def admin_maint_results():
         where.append("r.source=?"); p.append(a["source"])
     w = " AND ".join(where)
     total = c.db.one(f"SELECT COUNT(*) AS n FROM resource r LEFT JOIN check_result c ON c.resource_id=r.id WHERE {w}", p)["n"]
-    rows = c.db.q(f"SELECT r.id, r.org_id, r.source, r.data, r.version, c.category, c.summary, c.url, c.checked_at, c.verified_marker "
+    rows = c.db.q(f"SELECT r.id, r.org_id, r.source, r.data, r.version, c.category, c.summary, c.url, c.checked_at, c.verified_marker, c.flags "
                   f"FROM resource r LEFT JOIN check_result c ON c.resource_id=r.id WHERE {w} "
                   f"ORDER BY CASE c.category WHEN 'actively_bad' THEN 0 WHEN 'check_failed' THEN 1 WHEN 'discrepancy' THEN 2 "
                   f"WHEN 'missing_information' THEN 3 WHEN 'verified' THEN 5 ELSE 4 END, r.id LIMIT ? OFFSET ?", p + [per, (page - 1) * per])
     orgs = c.store.get_many(list({r["org_id"] for r in rows if r["org_id"]}))
-    pend = {r["resource_id"]: r["n"] for r in c.db.q(f"SELECT resource_id, COUNT(*) AS n FROM change_request WHERE status='pending' AND resource_id IN ({_in([r['id'] for r in rows])}) GROUP BY resource_id", [r["id"] for r in rows])}
+    ids = [r["id"] for r in rows]
+    pend = {r["resource_id"]: r["n"] for r in c.db.q(f"SELECT resource_id, COUNT(*) AS n FROM change_request WHERE status='pending' AND resource_id IN ({_in(ids)}) GROUP BY resource_id", ids)}
+    reports = {r["resource_id"]: r["n"] for r in c.db.q(f"SELECT resource_id, COUNT(*) AS n FROM user_report WHERE status='open' AND resource_id IN ({_in(ids)}) GROUP BY resource_id", ids)}
     return jsonify({"total": total, "page": page, "results": [
         {"id": r["id"], "name": loads(r["data"])["name"], "organization": _name(orgs.get(r["org_id"])), "org_id": r["org_id"],
          "source": r["source"], "category": r["category"] or "unchecked", "summary": r["summary"], "url": r["url"],
-         "checked_at": r["checked_at"], "verified": bool(r["verified_marker"]), "pending": pend.get(r["id"], 0)} for r in rows]})
+         "checked_at": r["checked_at"], "verified": bool(r["verified_marker"]), "pending": pend.get(r["id"], 0),
+         "flags": loads(r["flags"], []) if "flags" in r.keys() else [], "reports": reports.get(r["id"], 0)} for r in rows]})
 
 
 @bp.get("/admin/maintenance/runs")

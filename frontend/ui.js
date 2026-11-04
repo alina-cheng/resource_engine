@@ -53,7 +53,7 @@ export const closeModal = () => $("#modal").close();
 
 export const LABEL = { verified: "Verified", discrepancy: "Discrepancy", missing_information: "Missing information", actively_bad: "Actively bad",
   check_failed: "Check failed", unchecked: "Not checked yet", pending: "Pending", applied: "Applied", rejected: "Rejected", open: "Open", accepted: "Accepted",
-  declined: "Declined", closed: "Closed", approved: "Approved", completed: "Completed", failed: "Failed", running: "Running" };
+  declined: "Declined", closed: "Closed", approved: "Approved", completed: "Completed", failed: "Failed", running: "Running", resolved: "Resolved", user_reported: "User reported" };
 export const badge = (k) => h("span", { class: `badge b-${k}` }, LABEL[k] || k);
 export const fmtDate = (s) => (s ? new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: s.length > 10 ? "short" : undefined }) : "—");
 export const fmtDay = (s) => (s ? new Date(s).toLocaleDateString(undefined, { dateStyle: "medium" }) : "—");

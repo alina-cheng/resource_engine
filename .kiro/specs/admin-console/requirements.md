@@ -12,3 +12,4 @@ As an admin, I run imports and checks, review proposals with evidence, edit data
 4. THE SYSTEM SHALL let an admin see seeker and provider profiles and create provider logins linked to an organization.
 5. THE SYSTEM SHALL show import runs, whether they balance, and quarantined records.
 6. THE SYSTEM SHALL let an admin create, scope and revoke API keys.
+7. THE SYSTEM SHALL list user-reported listings with the reporter's note, link each to its record, and let an admin mark a report resolved; the overview SHALL show the count of open reports.

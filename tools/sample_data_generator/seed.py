@@ -76,6 +76,21 @@ def seed_demo(c, run_maintenance: bool = True) -> dict:
             c.db.run("INSERT INTO api_key (id,name,key_hash,key_prefix,source_scope,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
                      (new_id(), name, hash_key(key), key[:8], scope, "seed-demo", now_iso()))
             out.setdefault("api_keys", {})[name] = key
+    # user reports: demo the admin "reports" view. A report forces a fresh AI check of the
+    # record and raises the `user_reported` flag for a specialist.
+    if not c.db.one("SELECT 1 AS x FROM user_report LIMIT 1"):
+        uid = lambda e: (c.users.by_email(e) or {}).get("id")
+        demo_reports = [
+            ("Bay Area Diaper Bank", "ana@demo.org", "The phone number on their site is different from what's listed here."),
+            ("Harbor Community Pantry", "priya@demo.org", "I went and they were closed, the hours look wrong."),
+            ("Tri-City Rent Relief", "marcus@demo.org", "This program may have moved."),
+        ]
+        for org_name, email, note in demo_reports:
+            o = _org(c, org_name)
+            svc = _service_of(c, o["id"]) if o else None
+            u = c.users.by_email(email)
+            if svc and u:
+                c.maintenance.reports.file(svc["id"], reporter_id=u["id"], reporter_email=u["email"], note=note)
     if run_maintenance:
         out["maintenance"] = c.maintenance.run(scope="all", trigger="seed", initiated_by="seed-demo", force=True)
     return out
