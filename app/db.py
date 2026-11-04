@@ -70,7 +70,11 @@ CREATE INDEX IF NOT EXISTS ix_cr_status ON change_request(status, kind);
 CREATE TABLE IF NOT EXISTS check_result (
   resource_id TEXT PRIMARY KEY, resource_type TEXT NOT NULL, org_id TEXT, category TEXT NOT NULL,
   summary TEXT, url TEXT, checked_at TEXT NOT NULL, run_id TEXT, model TEXT, verified_marker INTEGER DEFAULT 0,
-  page_hash TEXT, record_version INTEGER);
+  page_hash TEXT, record_version INTEGER, flags TEXT);
+CREATE TABLE IF NOT EXISTS user_report (
+  id TEXT PRIMARY KEY, resource_id TEXT NOT NULL, reporter_id TEXT, reporter_email TEXT, note TEXT,
+  created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', resolved_by TEXT, resolved_at TEXT, run_id TEXT);
+CREATE INDEX IF NOT EXISTS ix_report_resource ON user_report(resource_id, status);
 CREATE TABLE IF NOT EXISTS maintenance_run (
   id TEXT PRIMARY KEY, scope TEXT NOT NULL, trigger TEXT NOT NULL, initiated_by TEXT,
   started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL, counts TEXT);

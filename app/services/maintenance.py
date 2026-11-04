@@ -1,39 +1,48 @@
-"""AI maintenance (priority 2): check stored records against the organization's website, categorise the
-result (R2.2), and propose evidence-backed changes that a person approves (R2.9). Facts only, never
-wording (R2.5). The website is treated as more accurate than the record in the MVP (R2.4)."""
+"""AI maintenance (priority 2): check stored records against the organization's website,
+categorise the result, and propose evidence-backed changes that a person approves. Facts only,
+never wording. The website is treated as more accurate than the record in the MVP.
+
+This service drives the ported detection engine (``app.maintenance``) through the bridge
+(``app.services.maintenance_bridge``). It preserves the public surface -- ``run``,
+``due_services``, ``check_service`` -- and the change_request / check_result write contract, so
+the API, UI and existing tests are unchanged. The detection engine itself (extractor,
+comparator, worker) replaces the former inline rule comparison.
+"""
 from __future__ import annotations
-import hashlib
-import re
+
 from datetime import datetime, timedelta, timezone
 
-from app.adapters.common import weekly_schedules
 from app.db import Database, dumps, loads, new_id, now_iso
-from app.hsds.ids import make_id
-from app.services.extract import CLOSED_RE
+from app.maintenance.extractor import BedrockInvoker
+from app.maintenance.reports import USER_REPORTED_FLAG, ReportService
+from app.maintenance.worker import (
+    CheckLogEntry,
+    WorkerSetupError,
+    check_record,
+    iso,
+    utc_now,
+)
+from app.services.maintenance_bridge import (
+    ChangeRequestSink,
+    WebsiteSourceAdapter,
+    build_engine_record,
+)
 from app.services.proposals import ChangeRequests
 from app.services.store import HsdsStore
 
 CATEGORIES = ["actively_bad", "check_failed", "discrepancy", "missing_information", "verified"]
-ACTIVELY_BAD_ERRORS = {"expired_certificate", "dns_failure", "connection_refused"}
-
-
-def _digits(s: str) -> str:
-    d = re.sub(r"\D", "", s or "")
-    return d[-10:]
-
-
-def _is_county(area: dict) -> bool:
-    return "county" in area.get("name", "").lower() or area.get("extent_type") == "county"
-
-
-def _strip_offset(t: str | None) -> str | None:
-    return re.sub(r"[+-]\d{2}:\d{2}$", "", t) if t else t
 
 
 class MaintenanceService:
     def __init__(self, settings, db: Database, store: HsdsStore, proposals: ChangeRequests, website, extractor, llm):
         self.s, self.db, self.store, self.proposals = settings, db, store, proposals
         self.website, self.extractor, self.llm = website, extractor, llm
+        self._site = WebsiteSourceAdapter(website)
+        # The grounded Bedrock extractor runs only when a real (non-mock) LLM is configured;
+        # otherwise the offline rule extractor supplies facts, so tests and the demo need no model.
+        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker()
+        self._rule_facts = None if not getattr(llm, "is_mock", True) else _RuleFactSource(extractor)
+        self.reports = ReportService(db)
 
     # ---- selection and runs ---------------------------------------------------------------------
     def due_services(self, limit: int | None = None) -> list[dict]:
@@ -49,6 +58,7 @@ class MaintenanceService:
         run_id = new_id()
         self.db.run("INSERT INTO maintenance_run (id,scope,trigger,initiated_by,started_at,status) VALUES (?,?,?,?,?,'running')",
                     (run_id, scope if scope == "all" else f"service:{service_id}", trigger, initiated_by, now_iso()))
+        reported = self.reports.open_resource_ids()
         if scope == "service":
             row = self.store.get(service_id)
             rows = [row] if row and row["type"] == "service" else []
@@ -56,12 +66,21 @@ class MaintenanceService:
         elif force:
             rows = [self.store.get(r["id"]) for r in self.db.q("SELECT id FROM resource WHERE type='service' AND deleted=0 ORDER BY id")][: limit or None]
         else:
-            rows = self.due_services(limit)
-        counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0}
+            # Due-by-age records, plus any record a user has reported (reports force a check
+            # even when the record is not yet due). Reported records are checked first.
+            due = self.due_services(limit)
+            due_ids = {r["id"] for r in due if r}
+            extra = [self.store.get(rid) for rid in reported if rid not in due_ids]
+            rows = [r for r in extra if r and r["type"] == "service"] + [r for r in due if r]
+        counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0, "user_reported": 0}
         cache: dict[str, object] = {}
         for row in rows:
-            out = self.check_service(row, cache, run_id, force)
+            # A reported record is force-checked (bypass the unchanged-page skip) and flagged.
+            row_reported = row["id"] in reported
+            out = self.check_service(row, cache, run_id, force or row_reported, reported=row_reported)
             counts["checked"] += 1
+            if out.get("flagged"):
+                counts["user_reported"] += 1
             if out.get("skipped"):
                 counts["skipped_unchanged"] += 1
             else:
@@ -78,142 +97,224 @@ class MaintenanceService:
         locs = [x["data"] for x in self.store.get_many([loads(r["data"])["location_id"] for r in sals]).values()]
         return org, locs
 
-    def check_service(self, svc: dict, page_cache: dict, run_id: str, force: bool = False) -> dict:
-        org, locs = self._context(svc)
-        d = svc["data"]
-        url = (org or {}).get("data", {}).get("website") or d.get("url")
+    def _prior_entry(self, svc: dict) -> CheckLogEntry | None:
+        """Rebuild the engine's CheckLogEntry from the stored check_result row, so review-need
+        skipping works against the existing columns (page_hash + record_version)."""
         prior = self.db.one("SELECT * FROM check_result WHERE resource_id=?", (svc["id"],))
+        if not prior:
+            return None
+        entry = CheckLogEntry(service_id=svc["id"], checked_at=prior["checked_at"])
+        entry.category = _category_or_none(prior["category"])
+        # A completed review is carried forward only when it verified the page. page_hash stores
+        # the engine's content_hash; record_version pins the record the review ran against.
+        if prior.get("page_hash") and prior.get("record_version") is not None:
+            entry.content_hash = prior["page_hash"]
+            entry.record_hash = _record_marker(prior["record_version"])
+            entry.reviewed_category = _category_or_none(prior["category"])
+            entry.reviewed_at = prior["checked_at"]
+        entry.fetch_failed = prior["category"] in ("actively_bad", "check_failed")
+        return entry
+
+    def check_service(self, svc: dict, page_cache: dict, run_id: str, force: bool = False,
+                      reported: bool = False) -> dict:
+        org, locs = self._context(svc)
+        url = (org or {}).get("data", {}).get("website") or svc["data"].get("url")
+        # A user report always raises the flag and resolves the open reports, whatever the
+        # check finds (or even if there's no website to check).
+        flags = [USER_REPORTED_FLAG] if reported else []
+        if reported:
+            self.reports.resolve_for(svc["id"], "maintenance", run_id)
         if not url:
-            return self._finish(svc, "check_failed", "No website on record to check against.", None, [], run_id, None, None)
-        if url not in page_cache:
-            page_cache[url] = self.website.fetch(url)
-        page = page_cache[url]
-        # --- failures are findings, not silent skips --------------------------------------------
-        if page.error or (page.status and page.status >= 400):
-            kind = page.error or f"http_{page.status}"
-            bad = kind in ACTIVELY_BAD_ERRORS or page.status in (404, 410)
-            msg = {"expired_certificate": "The website's security certificate has expired.",
-                   "dns_failure": "The website's address no longer resolves.",
-                   "connection_refused": "The website refuses connections."}.get(kind, f"The website could not be checked ({kind}).")
-            if page.status in (404, 410):
-                msg = f"The website page returns {page.status} (not found)."
-            return self._finish(svc, "actively_bad" if bad else "check_failed", msg, url, [], run_id, None, None)
-        page_hash = hashlib.sha256(page.text.encode()).hexdigest()[:16]
-        if (not force and prior and prior["page_hash"] == page_hash and prior["record_version"] == svc["version"]
-                and prior["category"] == "verified"):
-            self.db.run("UPDATE check_result SET checked_at=?, run_id=? WHERE resource_id=?", (now_iso(), run_id, svc["id"]))
-            return {"skipped": True, "category": "verified", "proposals": 0}
-        facts = self.extractor.extract(page.text)
-        category, summary, props = self.compare(svc, org, locs, facts, url)
-        return self._finish(svc, category, summary, url, props, run_id, page_hash, svc["version"])
+            return self._finish(svc, "check_failed", "No website on record to check against.", None, run_id, None, None, flags=flags)
 
-    def compare(self, svc, org, locs, facts, url):
-        d, props, missing = svc["data"], [], []
-        model = getattr(self.extractor, "name", "rules")
+        record = build_engine_record(self.store, self.db, svc, org, locs)
+        # Mark the record hash with the stored version so an applied finding (version bump)
+        # forces a fresh review rather than a carried-forward skip.
+        checked_at = iso(utc_now())
+        prior = self._prior_entry(svc)
+        record_marker = _record_marker(svc["version"])
 
-        def prop(resource, field, current, proposed, snip, label):
-            props.append({"resource": resource, "field": field, "current": current, "proposed": proposed, "label": label,
-                          "evidence": [{"field": field, "url": url, "snippet": snip, "model": model}]})
+        sink = ChangeRequestSink(svc, self.proposals, self._model_name())
+        try:
+            comparison, entry = _run_one(
+                self, record, url, prior, checked_at, force, record_marker, page_cache
+            )
+        except WorkerSetupError as exc:
+            # Every record would fail the same way; surface it as a failed check for this record.
+            return self._finish(svc, "check_failed", str(exc), url, run_id, None, None, flags=flags)
 
-        if facts["closed"]:
-            prop(svc, "status", d.get("status"), "inactive", facts["closed"]["snip"], "The website says this organization has closed")
-            return "actively_bad", "The website indicates the organization has closed.", props
-        # phones
-        stored = {_digits(p["number"]) for p in (d.get("phones", []) + [p for l in locs for p in l.get("phones", [])]
-                                                 + (org["data"].get("phones", []) if org else []))}
-        web = {p["v"]: p for p in facts["phones"]}
-        if web and not (stored & set(web)):
-            newp = [{"id": make_id("maint", "phone", svc["id"], v), "service_id": svc["id"], "number": p["display"], "type": "voice"}
-                    for v, p in web.items()]
-            prop(svc, "phones", d.get("phones", []), newp, next(iter(web.values()))["snip"],
-                 "Phone number on the website differs from the record")
-        # A stored number that appears on the page confirms the record. Extra numbers are ignored: an organization's
-        # page usually lists numbers for all its programs, and flagging them per service is noise (R2.5).
-        elif not stored and not web:
-            missing.append("phone")
-        # counties / service area
-        cur_counties = {re.sub(r",.*$", "", a["name"]).replace("County", "").replace("county", "").strip().lower()
-                        for a in d.get("service_areas", []) if _is_county(a)}
-        web_c = {c["v"]: c for c in facts["counties"]}
-        if web_c and set(web_c) != cur_counties:
-            keep = [a for a in d.get("service_areas", []) if not _is_county(a)]
-            new_areas = keep + [{"id": make_id("maint", "area", svc["id"], v), "service_id": svc["id"], "name": c["display"]}
-                                for v, c in sorted(web_c.items())]
-            lab = (f"Record lists {len(cur_counties)} counties; website lists {len(web_c)}" if cur_counties
-                   else "Counties served are missing from the record")
-            prop(svc, "service_areas", d.get("service_areas", []), new_areas, next(iter(web_c.values()))["snip"], lab)
-            if not cur_counties:
-                missing.append("service area")
-        # languages
-        cur_l = {l["name"].lower() for l in d.get("languages", [])}
-        web_l = {l["v"]: l for l in facts["languages"]}
-        if web_l and set(web_l) != cur_l:
-            new_langs = [{"id": make_id("maint", "lang", svc["id"], v), "service_id": svc["id"], "name": l["display"]} for v, l in web_l.items()]
-            prop(svc, "languages", d.get("languages", []), new_langs, next(iter(web_l.values()))["snip"],
-                 "Languages on the website differ from the record" if cur_l else "Languages are missing from the record")
-            if not cur_l:
-                missing.append("languages")
-        # hours
-        cur_h: dict[str, set] = {}
-        for sch in d.get("schedules", []) + [s for l in locs for s in l.get("schedules", [])]:
-            if sch.get("freq") == "WEEKLY" and sch.get("opens_at"):
-                for day in (sch.get("byday") or "").split(","):
-                    cur_h.setdefault(day, set()).add((_strip_offset(sch["opens_at"]), _strip_offset(sch["closes_at"])))
-        if facts["hours"]:
-            web_h = {k: set(v) for k, v in facts["hours"]["intervals"].items()}
-            if web_h != cur_h:
-                notes = [s for s in d.get("schedules", []) if not s.get("opens_at")]
-                new_sched = notes + weekly_schedules("maint", svc["id"], {"service_id": svc["id"]}, facts["hours"]["intervals"],
-                                                      self.s.default_timezone)
-                prop(svc, "schedules", d.get("schedules", []), new_sched, facts["hours"]["snip"],
-                     "Opening hours on the website differ from the record" if cur_h else "Opening hours are missing from the record")
-                if not cur_h:
-                    missing.append("hours")
-        elif not cur_h:
-            missing.append("hours")
-        # eligibility: compare facts (numbers, audiences), not wording
-        if facts["eligibility"]:
-            cur_e = d.get("eligibility_description", "")
-            key = lambda t: (set(re.findall(r"\d+%?", t)), {w for w in ("homeless", "veteran", "senior", "youth", "resident", "income", "disab", "famil") if w in t.lower()})
-            if not cur_e:
-                prop(svc, "eligibility_description", None, facts["eligibility"]["text"], facts["eligibility"]["snip"],
-                     "Eligibility is missing from the record")
-                missing.append("eligibility")
-            elif key(cur_e) != key(facts["eligibility"]["text"]):
-                prop(svc, "eligibility_description", cur_e, facts["eligibility"]["text"], facts["eligibility"]["snip"],
-                     "Eligibility rules on the website differ from the record")
-        elif not d.get("eligibility_description"):
-            missing.append("eligibility")
-        # organization description gap (HSDS requires one; ODRS supplies none)
-        if org and "description_missing" in (org["data"].get("x_resource_engine", {}).get("flags", [])) and facts["about"]:
-            prop(org, "description", org["data"].get("description"), facts["about"]["text"][:600], facts["about"]["snip"],
-                 "Organization description is missing; the website has one")
-        actionable = [p for p in props if p["resource"]["type"] == "service" or p["field"] == "description"]
-        diffs = [p for p in actionable if not p["label"].endswith("missing from the record") and "missing; the website" not in p["label"]]
-        if diffs:
-            return "discrepancy", "; ".join(dict.fromkeys(p["label"] for p in diffs)) + ".", props
-        if props or missing:
-            fills = sorted(set(missing) | {p["field"] for p in props})
-            return "missing_information", "The record lacks: " + ", ".join(fills) + ".", props
-        return "verified", "The record matches the website.", props
+        if comparison is None:  # unchanged since the last review: carried forward
+            self.db.run("UPDATE check_result SET checked_at=?, run_id=? WHERE resource_id=?",
+                        (now_iso(), run_id, svc["id"]))
+            return {"skipped": True, "category": (entry.category.value if entry.category else "verified"),
+                    "proposals": 0, "flagged": bool(reported)}
 
-    def _finish(self, svc, category, summary, url, props, run_id, page_hash, record_version) -> dict:
         n = 0
-        for p in props:
-            if not p["evidence"] or not p["evidence"][0].get("snippet"):
-                continue                                   # no evidence, no finding
-            self.proposals.create(
-                resource_id=p["resource"]["id"], resource_type=p["resource"]["type"], org_id=p["resource"]["org_id"],
-                kind="ai_finding", proposed_by_type="ai", proposed_by="ai-maintenance",
-                patch={p["field"]: {"current": p["current"], "proposed": p["proposed"]}}, evidence=p["evidence"],
-                category=category, title=p["label"])
-            n += 1
-        model = getattr(self.extractor, "name", "rules")
-        self.db.run("INSERT INTO check_result (resource_id,resource_type,org_id,category,summary,url,checked_at,run_id,model,verified_marker,page_hash,record_version) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET category=excluded.category, "
+        for finding in comparison.findings:
+            try:
+                saved = sink.save(finding)
+            except Exception:  # noqa: BLE001 - a rejected finding is dropped, never fatal
+                continue
+            if saved in sink.saved:
+                n += 1
+        summary = _summarize(comparison)
+        page_hash = entry.content_hash if entry.reviewed_category is not None else None
+        return self._record_result(svc, comparison.category.value, summary, url, run_id, page_hash, svc["version"], n, flags=flags)
+
+    # ---- persistence ----------------------------------------------------------------------------
+    def _record_result(self, svc, category, summary, url, run_id, page_hash, record_version, n, flags=None) -> dict:
+        model = self._model_name()
+        flags_json = dumps(flags) if flags else None
+        self.db.run("INSERT INTO check_result (resource_id,resource_type,org_id,category,summary,url,checked_at,run_id,model,verified_marker,page_hash,record_version,flags) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET category=excluded.category, "
                     "summary=excluded.summary, url=excluded.url, checked_at=excluded.checked_at, run_id=excluded.run_id, "
-                    "model=excluded.model, verified_marker=excluded.verified_marker, page_hash=excluded.page_hash, record_version=excluded.record_version",
+                    "model=excluded.model, verified_marker=excluded.verified_marker, page_hash=excluded.page_hash, record_version=excluded.record_version, flags=excluded.flags",
                     (svc["id"], "service", svc["org_id"], category, summary, url, now_iso(), run_id, model,
-                     1 if category == "verified" else 0, page_hash, record_version))
+                     1 if category == "verified" else 0, page_hash, record_version, flags_json))
         self.store.set_extension(svc["id"], "last_check", {"category": category, "checked_at": now_iso()})
-        return {"category": category, "proposals": n, "summary": summary}
+        return {"category": category, "proposals": n, "summary": summary, "flagged": bool(flags)}
+
+    def _finish(self, svc, category, summary, url, run_id, page_hash, record_version, flags=None) -> dict:
+        """Backwards-compatible finish for the no-website / setup-error paths (no findings)."""
+        return self._record_result(svc, category, summary, url, run_id, page_hash, record_version, 0, flags=flags)
+
+    def _model_name(self) -> str:
+        return getattr(self.extractor, "name", "rules") if self.llm.is_mock else (self.s.bedrock_model_id or "bedrock")
+
+
+# --------------------------------------------------------------------------- #
+# Driving the engine for one record
+# --------------------------------------------------------------------------- #
+def _run_one(service, record, url, prior, checked_at, force, record_marker, page_cache):
+    """Run the detection worker for one record, choosing the offline rule facts or the grounded
+    Bedrock extractor. Returns (comparison, entry)."""
+    if service._rule_facts is not None:
+        return service._rule_facts.check(record, url, prior, checked_at, force, record_marker, service._site, page_cache)
+    # Grounded Bedrock path.
+    return check_record(
+        {**record, "_marker": record_marker},
+        url=url,
+        website_source=service._site,
+        invoke=service._invoke,
+        previous=prior,
+        checked_at=checked_at,
+        force=force,
+    )
+
+
+class _RuleFactSource:
+    """Offline fact source: resource-engine's deterministic RuleExtractor, adapted to the facts
+    shape the ported comparator consumes. Used whenever the LLM is a mock (demo, tests)."""
+
+    def __init__(self, rule_extractor) -> None:
+        self._rules = rule_extractor
+        self.name = getattr(rule_extractor, "name", "rules")
+
+    def check(self, record, url, prior, checked_at, force, record_marker, site, page_cache):
+        from app.maintenance.comparator import Category, check_page, site_loaded
+        from app.maintenance.worker import CheckLogEntry, page_hash as _page_hash
+        if url not in page_cache:
+            page_cache[url] = site.get(url)
+        page = page_cache[url]
+        entry = CheckLogEntry(service_id=record["id"], checked_at=checked_at, url=url)
+        if prior is not None:
+            entry.content_hash = prior.content_hash
+            entry.record_hash = prior.record_hash
+            entry.reviewed_category = prior.reviewed_category
+            entry.reviewed_at = prior.reviewed_at
+        entry.fetch_failed = not site_loaded(page)
+        readable = not entry.fetch_failed and bool((page.content or "").strip())
+        marker = None
+        if readable:
+            marker = _page_hash(page.content or "")
+            unchanged = (
+                not force
+                and entry.content_hash is not None
+                and entry.content_hash == marker
+                and entry.record_hash == record_marker
+                and entry.reviewed_category is not None
+            )
+            if unchanged:
+                entry.category = entry.reviewed_category
+                return None, entry
+        extraction = None
+        if readable:
+            facts = self._facts(page.content or "")
+            extraction = {"facts": facts, "model_id": self.name}
+        comparison = check_page(
+            record, page, extraction, url=url, checked_at=checked_at,
+            unreachable_before=bool(prior and prior.fetch_failed),
+        )
+        if extraction is not None and comparison.category is not Category.CHECK_FAILED:
+            entry.content_hash = marker
+            entry.record_hash = record_marker
+            entry.reviewed_category = comparison.category
+            entry.reviewed_at = checked_at
+        return comparison, entry
+
+    def _facts(self, html: str) -> dict:
+        """Map the RuleExtractor output onto the ported comparator's fact schema.
+
+        The comparator reads facts as ``{key: {"value": ..., "quote": ...}}`` with keys
+        area_served, phones, languages, hours, eligibility_*, operating_status, emails.
+        """
+        from app.maintenance.extractor import visible_text
+        raw = self._rules.extract(visible_text(html))
+        facts: dict = {}
+        if raw.get("closed"):
+            facts["operating_status"] = {"value": "closed", "quote": raw["closed"]["snip"]}
+        if raw.get("phones"):
+            quote = raw["phones"][0]["snip"]
+            facts["phones"] = {"value": [p["display"] for p in raw["phones"]], "quote": quote}
+        if raw.get("counties"):
+            quote = raw["counties"][0]["snip"]
+            facts["area_served"] = {"value": [c["display"] for c in raw["counties"]], "quote": quote}
+        if raw.get("languages"):
+            quote = raw["languages"][0]["snip"]
+            facts["languages"] = {"value": [l["display"] for l in raw["languages"]], "quote": quote}
+        if raw.get("hours"):
+            facts["hours"] = {"value": _hours_statements(raw["hours"]["intervals"]), "quote": raw["hours"]["snip"]}
+        if raw.get("eligibility"):
+            facts["eligibility_income"] = {"value": raw["eligibility"]["text"], "quote": raw["eligibility"]["snip"]}
+        return facts
+
+
+def _hours_statements(intervals: dict) -> list[str]:
+    out = []
+    for day, pairs in intervals.items():
+        for o, c in pairs:
+            out.append(f"{day} {o}-{c}")
+    return out or ["hours listed"]
+
+
+def _summarize(comparison) -> str:
+    from app.maintenance.comparator import Category
+    cat = comparison.category
+    if cat is Category.VERIFIED:
+        return "The record matches the website."
+    if cat is Category.ACTIVELY_BAD:
+        return "The website indicates the organization has closed or is unreachable."
+    if cat is Category.CHECK_FAILED:
+        return comparison.findings[0].evidence[0].snippet if comparison.findings and comparison.findings[0].evidence else "The check could not complete."
+    labels = []
+    for f in comparison.findings:
+        if f.field and f.category in (Category.DISCREPANCY, Category.MISSING_INFORMATION):
+            labels.append(f.field)
+    uniq = list(dict.fromkeys(labels))
+    if cat is Category.MISSING_INFORMATION:
+        return "The record lacks: " + ", ".join(uniq) + "." if uniq else "The record is missing information."
+    return "The website differs from the record on: " + ", ".join(uniq) + "." if uniq else "The website differs from the record."
+
+
+def _category_or_none(value):
+    from app.maintenance.comparator import Category
+    try:
+        return Category(value)
+    except ValueError:
+        return None
+
+
+def _record_marker(version) -> str:
+    """A stable record hash surrogate derived from the stored version, so a version bump (an
+    applied finding) forces a fresh review instead of a carried-forward skip."""
+    return f"v{version}"

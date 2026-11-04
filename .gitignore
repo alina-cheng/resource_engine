@@ -3,6 +3,7 @@ data/generated/
 __pycache__/
 *.pyc
 .env
+.venv/
 .terraform/
 *.tfstate*
 *.tfplan
