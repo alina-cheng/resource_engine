@@ -11,9 +11,8 @@ make demo            # generates data, loads it, seeds demo users, serves http:/
 `make demo` runs `python -m app.demo --reset`: it generates ~236 fake source records, imports them (ODRS + NDP), creates demo users, policy documents, help requests and API keys, runs one AI maintenance pass, then serves the app. It uses `config/sources.demo.json` and its own folder, `var/demo`, so it never touches a real import.
 
 ## Real data
-Real imports use `config/sources.json`: ODRS comes from the live API and NDP from the two files in `data/samples`. Put the key in `.env` as `ODRS_API_KEY=...`, then:
+Real imports use `config/sources.json`: ODRS comes from the live API and NDP from the two files in `data/samples`. Put the key in `.env` as `ODRS_API_KEY=...` (the app loads this file at startup, and git ignores it), then:
 ```bash
-set -a; source .env; set +a
 python -m app.jobs.run seed-demo --no-maintenance   # imports real data if the database is empty, adds demo logins
 make run                                            # http://127.0.0.1:8000
 ```

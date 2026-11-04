@@ -1,14 +1,16 @@
 """ODRS live API transport, with the network faked. The key must never reach stored data or errors."""
 import json
 import os
+import tempfile
 import unittest
 from glob import glob
+from pathlib import Path
 from unittest.mock import patch
 
 import requests
 
 from app.adapters.base import SourceConfig
-from app.config import ROOT
+from app.config import ROOT, load_settings
 from tests.helpers import SAMPLES, make_container
 
 KEY = "secret-test-key"
@@ -155,6 +157,24 @@ class OdrsOrgDescriptionTests(unittest.TestCase):
         self.assertTrue(any(r["native_id"].startswith("organization-") for r in rows))
         for r in rows:
             self.assertNotIn(KEY.encode(), self.c.blob.get(r["blob_key"]))
+
+
+class DotEnvTests(unittest.TestCase):
+    def _load(self, env):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".env").write_text("ODRS_API_KEY=from-file\n")
+            with patch.dict(os.environ, env, clear=True), patch("app.config.ROOT", Path(d)):
+                load_settings()
+                return os.environ["ODRS_API_KEY"]
+
+    def test_key_is_read_from_the_env_file(self):
+        self.assertEqual(self._load({}), "from-file")
+
+    def test_a_variable_already_set_takes_priority(self):
+        self.assertEqual(self._load({"ODRS_API_KEY": "from-shell"}), "from-shell")
+
+    def test_env_file_is_ignored_by_git(self):
+        self.assertIn(".env", (ROOT / ".gitignore").read_text().splitlines())
 
 
 class SourceConfigTests(unittest.TestCase):
