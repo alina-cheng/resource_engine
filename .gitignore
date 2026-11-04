@@ -8,3 +8,6 @@ __pycache__/
 *.tfstate*
 *.tfplan
 .pytest_cache/
+
+# API check run artifact (regenerated)
+reports/api_check_results.json

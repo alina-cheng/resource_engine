@@ -13,3 +13,4 @@ As a platform engineer, I add a source and get valid HSDS records, with nothing 
 5. WHEN the same source is imported again THE SYSTEM SHALL update existing records by deterministic id and SHALL NOT create duplicates.
 6. WHEN a source update and a human or AI change touch the same field THE SYSTEM SHALL keep the current value and open a conflict change request.
 7. WHEN a new source is added THE SYSTEM SHALL require only an adapter module and a configuration entry.
+8. WHEN an admin uploads a JSON file for an existing source THE SYSTEM SHALL run it through the same fetch, map, validate and upsert-or-quarantine pipeline as a configured import, reusing that source's adapter, and SHALL report the same balanced counts.

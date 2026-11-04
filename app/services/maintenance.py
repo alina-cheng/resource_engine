@@ -130,7 +130,17 @@ class MaintenanceService:
         org = self.store.get(svc["org_id"]) if svc["org_id"] else None
         sals = [r for r in self.db.q("SELECT data FROM resource WHERE type='service_at_location' AND deleted=0 AND org_id=?", (svc["org_id"],))
                 if loads(r["data"]).get("service_id") == svc["id"]]
-        locs = [x["data"] for x in self.store.get_many([loads(r["data"])["location_id"] for r in sals]).values()]
+        locations = self.store.get_many([loads(r["data"])["location_id"] for r in sals])
+        locs = []
+        for sal in sals:
+            link = loads(sal["data"])
+            location = locations.get(link["location_id"])
+            if location:
+                loc = dict(location["data"])
+                for field in ("schedules", "phones", "accessibility"):
+                    if link.get(field):
+                        loc[field] = list(loc.get(field, [])) + list(link[field])
+                locs.append(loc)
         return org, locs
 
     def _prior_entry(self, svc: dict) -> CheckLogEntry | None:

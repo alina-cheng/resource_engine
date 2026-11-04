@@ -1,5 +1,5 @@
 # Known limitations (read before production)
-1. **HSDS schemas are a hand-authored subset**, not the official v3.2.3 files. Run `make schemas`, then fix whatever the stricter schemas reject.
+1. **Databases created before the official HSDS schemas need a fresh load.** Startup migrates stored documents to valid v3.2.3, but record ids changed with the canonical transforms, so re-importing into an older database does not match existing records. Load into a new database instead.
 2. **Untested here:** PostgreSQL path, Cognito, S3, Bedrock, OpenSearch, Textract, live website fetching, ECS job runner, Terraform.
 3. **Personal data.** Seeker profiles, needs and requests are sensitive. Needs a privacy and legal review (HIPAA/state law, retention, deletion, consent records, audit of admin access), field-level encryption decisions and a data-processing agreement with any model provider.
 4. **Maintenance accuracy** is measured only on synthetic pages. Real sites need JavaScript rendering, different wording and anti-bot handling; those cases surface as `check_failed`.

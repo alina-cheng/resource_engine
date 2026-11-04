@@ -21,7 +21,7 @@
 | elig-*, community-*, citizenship-*, gender-* flags | taxonomy "One Degree Eligibility" + attribute | |
 | phones, locations[].phones | phone | extension split from number; de-duplicated |
 | locations[] | location, address, service_at_location | address omitted if address, city or ZIP missing (warning) |
-| weekly schedule | schedule (WEEKLY, byday, opens_at/closes_at with UTC offset, timezone) | days with identical hours grouped; schedule notes kept as a notes schedule |
+| weekly schedule | schedule (WEEKLY, byday, opens_at/closes_at with UTC offset; the IANA zone is kept in x_resource_engine.local_schedule) | days with identical hours grouped; schedule notes kept as a notes schedule |
 | attachments, images, rating*, slugs, translations | not mapped | stay in the raw store |
 
 ## NDP (`app/adapters/ndp.py`)
