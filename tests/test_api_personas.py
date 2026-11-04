@@ -168,6 +168,37 @@ class ApiTests(unittest.TestCase):
         after = self.cl.post("/api/chat", json=q).json
         self.assertTrue([c for c in after["citations"] if c["title"] == "Telescope loans"])
 
+    # ---- import by upload --------------------------------------------------------------------------
+    def test_admin_imports_an_uploaded_ndp_file_through_the_pipeline(self):
+        from app.config import ROOT
+        raw = (ROOT / "data" / "samples" / "national-data-platform-sample-1.json").read_bytes()
+        data = {"file": (io.BytesIO(raw), "ndp-sample-1.json"), "source": "ndp"}
+        r = self.cl.post("/api/admin/imports/upload", headers=self.admin, data=data, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 201, r.json)
+        body = r.json
+        # Same pipeline guarantees: every received record is either stored or quarantined (R1.7).
+        self.assertEqual(body["source"], "ndp")
+        self.assertGreater(body["received"], 0)
+        self.assertEqual(body["received"], body["stored"] + body["quarantined"])
+        self.assertEqual(body["filename"], "ndp-sample-1.json")
+        # The run shows up in the imports list with the upload trigger.
+        runs = self.cl.get("/api/admin/imports", headers=self.admin).json["runs"]
+        self.assertTrue(any(x["id"] == body["run_id"] and x["trigger"] == "upload" for x in runs))
+
+    def test_import_upload_rejects_non_json_and_requires_a_file(self):
+        self.assertEqual(self.cl.post("/api/admin/imports/upload", headers=self.admin,
+                                      data={}, content_type="multipart/form-data").status_code, 400)
+        bad = {"file": (io.BytesIO(b"not json at all"), "bad.json"), "source": "ndp"}
+        self.assertEqual(self.cl.post("/api/admin/imports/upload", headers=self.admin,
+                                      data=bad, content_type="multipart/form-data").status_code, 400)
+
+    def test_import_upload_is_admin_only(self):
+        # A fresh stream per request: werkzeug consumes (and closes) the BytesIO on send.
+        def data():
+            return {"file": (io.BytesIO(b"{\"data\": []}"), "x.json"), "source": "ndp"}
+        self.assertEqual(self.cl.post("/api/admin/imports/upload", data=data(), content_type="multipart/form-data").status_code, 401)
+        self.assertEqual(self.cl.post("/api/admin/imports/upload", headers=self.seek, data=data(), content_type="multipart/form-data").status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

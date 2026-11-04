@@ -135,8 +135,31 @@ export function admin(page, need) {
   async function imports() {
     const d = await api("/admin/imports"), q = await api("/admin/quarantine");
     const run = (source) => async (e) => { e.target.disabled = true; try { await api("/admin/imports/run", { method: "POST", body: { source, wait: true } }); toast("Import finished."); } catch (x) { toast(x.message); } refresh(); };
+    // Upload a source file and run it through the normal ingest pipeline (reuses the source's adapter).
+    const file = h("input", { type: "file", accept: ".json,application/json" });
+    const source = h("select", null, d.sources.map((s) => h("option", { value: s.name }, `${s.name} (${s.adapter})`)));
+    const ndp = d.sources.find((s) => s.adapter === "ndp" || s.name === "ndp");
+    if (ndp) source.value = ndp.name;
+    const upOut = h("div");
+    const upload = async (e) => {
+      upOut.replaceChildren();
+      if (!file.files[0]) { upOut.append(errBox(new Error("Choose a JSON file first."))); return; }
+      const fd = new FormData(); fd.append("file", file.files[0]); fd.append("source", source.value);
+      e.target.disabled = true;
+      try {
+        const r = await api("/admin/imports/upload", { method: "POST", form: fd });
+        toast(`Imported ${r.filename}: ${r.stored} stored, ${r.quarantined} quarantined.`);
+        refresh();
+      } catch (x) { upOut.append(errBox(x)); e.target.disabled = false; }
+    };
     show(h("div", { class: "row spread" }, h("h1", null, "Imports"), h("button", { onclick: run() }, "Import all sources now")),
-      h("h2", null, "Sources"), table(["Name", "Adapter", "Location", ""], d.sources.map((s) => [s.name, s.adapter, h("span", { class: "mono" }, s.location), h("button", { class: "ghost sm", onclick: run(s.name) }, "Import now")])),
+      h("h2", null, "Upload a file"),
+      h("p", { class: "muted small" }, "Import a JSON file for a source instead of its configured location. It runs through the same pipeline (map, validate, store or quarantine). NDP files use the shape ", h("span", { class: "mono" }, '{ "data": [ … ] }'), "."),
+      h("div", { class: "card flat", style: "max-width:560px" }, upOut,
+        h("label", null, "Source"), source,
+        h("label", { style: "margin-top:.6rem" }, "File"), file,
+        h("div", { style: "margin-top:.8rem" }, h("button", { onclick: upload }, "Upload and import"))),
+      h("h2", { style: "margin-top:1.5rem" }, "Sources"), table(["Name", "Adapter", "Location", ""], d.sources.map((s) => [s.name, s.adapter, h("span", { class: "mono" }, s.location), h("button", { class: "ghost sm", onclick: run(s.name) }, "Import now")])),
       h("h2", { style: "margin-top:1.5rem" }, "Runs"), h("p", { class: "muted small" }, "Every run must balance: received = stored + quarantined."), importRuns(d.runs),
       h("h2", { style: "margin-top:1.5rem" }, "Quarantine"), table(["When", "Source", "Record", "Why it was held back"], q.quarantine.map((r) => [fmtDate(r.created_at), r.source, r.native_id, r.reason]), "Nothing is quarantined."));
   }
