@@ -10,6 +10,7 @@ comparator, worker) replaces the former inline rule comparison.
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 
 from app.db import Database, dumps, loads, new_id, now_iso
@@ -45,6 +46,32 @@ class MaintenanceService:
         self.reports = ReportService(db)
 
     # ---- selection and runs ---------------------------------------------------------------------
+    def active_source_count(self) -> int:
+        """Number of active service records -- the basis for self-sizing the daily batch."""
+        return self.db.one("SELECT COUNT(*) AS n FROM resource WHERE type='service' AND deleted=0")["n"]
+
+    def daily_batch(self) -> int:
+        """Checks per scheduled run, derived from the source count so every source is reviewed
+        within MAINTENANCE_RECHECK_DAYS. Not hard-coded; scales as the corpus grows.
+
+            batch = ceil(active / recheck_days) * safety_factor, capped by max_batch (0 = uncapped)
+
+        The safety factor adds headroom so normal failures/skips don't let records slip past the
+        window. The optional ceiling protects Bedrock throughput/quota, not cost.
+
+        This sizes a scheduled run (``limit`` unset). It does NOT bound a ``force=True`` run nor
+        an explicit ``limit``: force means "recheck everything now" and deliberately ignores the
+        self-sized batch, so an operator-triggered full recheck at large scale is unbounded (see
+        docs/known-limitations.md #12 and the deferred sharding task).
+        """
+        active = self.active_source_count()
+        days = max(1, self.s.maintenance_recheck_days)
+        target = math.ceil(active / days)
+        batch = math.ceil(target * max(1.0, self.s.maintenance_safety_factor))
+        if self.s.maintenance_max_batch and self.s.maintenance_max_batch > 0:
+            batch = min(batch, self.s.maintenance_max_batch)
+        return max(1, batch) if active else 0
+
     def due_services(self, limit: int | None = None) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self.s.maintenance_recheck_days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         rows = self.db.q("SELECT r.id FROM resource r LEFT JOIN check_result c ON c.resource_id=r.id "
@@ -59,6 +86,10 @@ class MaintenanceService:
         self.db.run("INSERT INTO maintenance_run (id,scope,trigger,initiated_by,started_at,status) VALUES (?,?,?,?,?,'running')",
                     (run_id, scope if scope == "all" else f"service:{service_id}", trigger, initiated_by, now_iso()))
         reported = self.reports.open_resource_ids()
+        # A scheduled run with no explicit limit self-sizes from the source count so every
+        # source is reviewed within the window. An explicit limit (e.g. an admin one-off) wins.
+        batch = self.daily_batch()
+        effective_limit = limit if limit is not None else (batch or None)
         if scope == "service":
             row = self.store.get(service_id)
             rows = [row] if row and row["type"] == "service" else []
@@ -66,13 +97,16 @@ class MaintenanceService:
         elif force:
             rows = [self.store.get(r["id"]) for r in self.db.q("SELECT id FROM resource WHERE type='service' AND deleted=0 ORDER BY id")][: limit or None]
         else:
-            # Due-by-age records, plus any record a user has reported (reports force a check
-            # even when the record is not yet due). Reported records are checked first.
-            due = self.due_services(limit)
+            # Due-by-age records (capped at the self-sized batch), plus any record a user has
+            # reported (reports are checked even when not yet due). Reported records go first.
+            due = self.due_services(effective_limit)
             due_ids = {r["id"] for r in due if r}
             extra = [self.store.get(rid) for rid in reported if rid not in due_ids]
             rows = [r for r in extra if r and r["type"] == "service"] + [r for r in due if r]
-        counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0, "user_reported": 0}
+        # batch_target is the self-sized cap on the due-by-age slice. `checked` may exceed it,
+        # because user-reported records are always added on top, and a force run ignores it.
+        counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0,
+                                               "user_reported": 0, "batch_target": effective_limit or 0}
         cache: dict[str, object] = {}
         for row in rows:
             # A reported record is selected for this run and always flagged for a human, but it

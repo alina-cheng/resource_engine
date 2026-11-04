@@ -13,5 +13,6 @@ As an admin, I want records checked against organization websites on a schedule,
 5. THE SYSTEM SHALL compare facts and SHALL NOT flag wording differences.
 6. WHEN the page and record are unchanged since a verified check THE SYSTEM SHALL skip the model call.
 7. WHEN an admin requests it THE SYSTEM SHALL check a single record immediately.
-8. WHEN any signed-in user reports a listing THE SYSTEM SHALL record the report and, on the next maintenance run, force a fresh check of that record (bypassing the unchanged-page skip) and raise a single `user_reported` flag for specialist review, whatever the check concludes.
-9. WHEN a reported record has been rechecked THE SYSTEM SHALL mark its open reports resolved.
+8. WHEN any signed-in user reports a listing THE SYSTEM SHALL record the report and, on the next maintenance run, select that record and raise a single `user_reported` flag for specialist review, whatever the check concludes. The AI re-reviews only if the page changed since the last review (it respects the hash-skip); the human-review flag is raised regardless.
+9. WHEN a reported record has been handled in a run THE SYSTEM SHALL mark its open reports resolved.
+10. THE SYSTEM SHALL size each scheduled maintenance run from the active source count so that every source is reviewed within `MAINTENANCE_RECHECK_DAYS`: checks per run = ceil(active_sources / recheck_days) × safety_factor, optionally capped by `MAINTENANCE_MAX_BATCH`. The daily count SHALL NOT be a fixed number and SHALL scale as the corpus grows. An explicit limit (e.g. an admin one-off) overrides the self-sized value.

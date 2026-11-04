@@ -25,13 +25,17 @@ variable "certificate_arn"  {
   description = "ACM certificate for HTTPS. Empty = HTTP only (demo)."
   default     = ""
 }
-variable "bedrock_model_id" { default = "anthropic.claude-3-5-haiku-20241022-v1:0" }
+variable "bedrock_model_id" { default = "anthropic.claude-haiku-5-5" }
 variable "llm_backend"      { default = "bedrock" }
 variable "website_backend"  { default = "live" }
 variable "enable_opensearch" { default = false }
 variable "import_schedule"      { default = "cron(0 11 * * ? *)" }   # 04:00 Pacific, daily
 variable "maintenance_schedule" { default = "cron(0 12 * * ? *)" }   # after the import
-variable "maintenance_batch"    { default = 200 }
+# Maintenance self-sizes each run from the source count so every source is reviewed within the
+# window: checks/run = ceil(active_sources / recheck_days) * safety_factor, capped by max_batch.
+variable "maintenance_recheck_days"  { default = 30 }
+variable "maintenance_safety_factor" { default = 1.2 }
+variable "maintenance_max_batch"     { default = 0 }   # 0 = uncapped (throughput/quota ceiling)
 
 locals {
   name = var.project

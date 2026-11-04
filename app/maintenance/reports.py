@@ -1,10 +1,12 @@
 """User reports -- the trigger for an on-demand maintenance recheck.
 
 A report is a human saying "something about this listing looks wrong". One report is enough:
-the record is forced due for a fresh AI check (bypassing the page-unchanged skip), and the
-single ``user_reported`` flag is raised for a specialist regardless of what the check finds
-(detection only proposes; a person decides). This is all maintenance-owned; the report table
-and the HTTP endpoint are thin additive surfaces in db.py / routes_app.py.
+the record is selected for the next maintenance run and the single ``user_reported`` flag is
+raised for a specialist regardless of what the check finds. The report respects the
+page-hash skip -- the AI re-reviews only if the page changed since the last review, but the
+human-review flag is raised either way (a person looks because a person flagged it; detection
+only proposes, a person decides). This is all maintenance-owned; the report table and the HTTP
+endpoint are thin additive surfaces in db.py / routes_app.py.
 """
 from __future__ import annotations
 
@@ -33,7 +35,8 @@ class ReportService:
         return {"id": rid, "resource_id": resource_id, "status": "open"}
 
     def open_resource_ids(self) -> set[str]:
-        """Service ids with at least one open report: these are forced due for a recheck."""
+        """Service ids with at least one open report: these are selected into the next run and
+        flagged for a human; the AI re-reviews only if the page changed (hash-skip applies)."""
         return {r["resource_id"] for r in
                 self.db.q("SELECT DISTINCT resource_id FROM user_report WHERE status='open'")}
 
