@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import requests
 
-from app.adapters.base import SourceConfig
+from app.adapters.base import Resource, SourceConfig
 from app.config import ROOT, load_settings
 from tests.helpers import SAMPLES, make_container
 
@@ -157,6 +157,35 @@ class OdrsOrgDescriptionTests(unittest.TestCase):
         self.assertTrue(any(r["native_id"].startswith("organization-") for r in rows))
         for r in rows:
             self.assertNotIn(KEY.encode(), self.c.blob.get(r["blob_key"]))
+
+
+class ReimportTests(unittest.TestCase):
+    def setUp(self):
+        self.c = make_container()
+        self.cfg = SourceConfig("odrs", "odrs", str(SAMPLES / "BayesExport_20250729.json"))
+        self.c.ingest.run(self.cfg)
+
+    def test_reimport_survives_rows_with_null_source_info(self):
+        row = self.c.db.one("SELECT id, data FROM resource WHERE type='service_at_location' LIMIT 1")
+        data = {**json.loads(row["data"]), "x_resource_engine": {"source": None}}
+        self.c.db.run("UPDATE resource SET data=? WHERE id=?", (json.dumps(data), row["id"]))
+        out = self.c.ingest.run(self.cfg)
+        self.assertEqual(out["status"], "completed", out["error"])
+        self.assertEqual(out["created"], 0)
+
+    def test_merging_a_record_without_source_info_does_not_store_null(self):
+        row = self.c.db.one("SELECT id, data FROM resource WHERE type='taxonomy' LIMIT 1")
+        data = json.loads(row["data"])
+        self.assertNotIn("x_resource_engine", data)
+        res = Resource("taxonomy", row["id"], None, {**data, "description": "Changed by the source"})
+        with self.c.db.tx() as t:
+            t.run("DELETE FROM resource_source WHERE resource_id=?", (row["id"],))
+            t.run("INSERT INTO resource_source (resource_id,source,native_id,fetched_at,snapshot) VALUES (?,?,?,?,?)",
+                  (row["id"], "odrs", "x", "2026-01-01", row["data"]))
+            out = self.c.store.ingest_upsert(t, "odrs", "x", "2026-01-02", res, None)
+        self.assertEqual(out["action"], "updated")
+        stored = self.c.store.get(row["id"])["data"]
+        self.assertNotIn("source", stored.get("x_resource_engine", {}))
 
 
 class DotEnvTests(unittest.TestCase):
