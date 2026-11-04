@@ -151,31 +151,38 @@ if __name__ == "__main__":
 
 
 class UserReportTriggers(unittest.TestCase):
-    """A user report forces a fresh AI check and raises the single user_reported flag."""
+    """A user report selects the record and always raises the user_reported flag for a human,
+    but it still respects the hash-skip: the AI re-reviews only if the page changed."""
 
     @classmethod
     def setUpClass(cls):
         from tests.helpers import generated_container
         cls.c, cls.gen = generated_container(20, 10, 7)
+        # First full run establishes a page hash + category for every record.
         cls.c.maintenance.run(scope="all", force=True, trigger="test", initiated_by="test")
         cls.svc = cls.c.store.list("service", limit=1)[0][0]
 
-    def test_report_forces_recheck_and_raises_flag(self):
+    def test_report_on_unchanged_page_skips_ai_but_still_flags(self):
         c, svc = self.c, self.svc
         c.maintenance.reports.file(svc["id"], reporter_id="u1", reporter_email="u1@x.org", note="looks wrong")
-        # Not forced, not due by age -> would normally be skipped; the report makes it due.
+        # Page is unchanged since the first run -> AI is skipped, but the record is selected
+        # and flagged for a human because a person reported it.
         out = c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
         self.assertGreaterEqual(out["user_reported"], 1)
+        self.assertGreaterEqual(out["skipped_unchanged"], 1)  # the reported record hash-skipped
         row = c.db.one("SELECT flags FROM check_result WHERE resource_id=?", (svc["id"],))
         self.assertIn("user_reported", (row["flags"] or ""))
-        # The report is resolved once the record has been rechecked.
+        # The report is resolved once the record has been handled.
         self.assertFalse(c.maintenance.reports.has_open(svc["id"]))
 
-    def test_single_flag_regardless_of_outcome(self):
-        # Whatever the check concludes, exactly the one user_reported flag is raised.
+    def test_report_on_changed_page_runs_ai_and_flags(self):
         c = self.c
-        other = c.store.list("service", limit=2)[0][1]
+        other = c.store.list("service", limit=3)[0][2]
+        # Change the record so its hash differs -> the report-driven run re-reviews with the AI.
+        c.store.apply_patch(other["id"], {"eligibility_description": "Changed eligibility text for the test."},
+                            "admin", "tester")
         c.maintenance.reports.file(other["id"], reporter_id="u2", reporter_email="u2@x.org")
-        c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
+        out = c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
+        self.assertGreaterEqual(out["user_reported"], 1)
         flags = json.loads(c.db.one("SELECT flags FROM check_result WHERE resource_id=?", (other["id"],))["flags"] or "[]")
-        self.assertEqual(flags, ["user_reported"])
+        self.assertEqual(flags, ["user_reported"])  # exactly the one flag, whatever the AI concluded

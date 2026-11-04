@@ -75,9 +75,11 @@ class MaintenanceService:
         counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0, "user_reported": 0}
         cache: dict[str, object] = {}
         for row in rows:
-            # A reported record is force-checked (bypass the unchanged-page skip) and flagged.
+            # A reported record is selected for this run and always flagged for a human, but it
+            # still respects the hash-skip: the AI re-reviews only if the page changed since the
+            # last review. A person looks because a person flagged it, not because the AI did.
             row_reported = row["id"] in reported
-            out = self.check_service(row, cache, run_id, force or row_reported, reported=row_reported)
+            out = self.check_service(row, cache, run_id, force, reported=row_reported)
             counts["checked"] += 1
             if out.get("flagged"):
                 counts["user_reported"] += 1
@@ -143,11 +145,17 @@ class MaintenanceService:
             # Every record would fail the same way; surface it as a failed check for this record.
             return self._finish(svc, "check_failed", str(exc), url, run_id, None, None, flags=flags)
 
-        if comparison is None:  # unchanged since the last review: carried forward
-            self.db.run("UPDATE check_result SET checked_at=?, run_id=? WHERE resource_id=?",
-                        (now_iso(), run_id, svc["id"]))
+        if comparison is None:  # unchanged since the last review: AI skipped (hash matched)
+            # Even when the AI is skipped, a reported record is flagged for human review, so the
+            # user_reported flag is persisted on the existing check_result row.
+            if flags:
+                self.db.run("UPDATE check_result SET checked_at=?, run_id=?, flags=? WHERE resource_id=?",
+                            (now_iso(), run_id, dumps(flags), svc["id"]))
+            else:
+                self.db.run("UPDATE check_result SET checked_at=?, run_id=? WHERE resource_id=?",
+                            (now_iso(), run_id, svc["id"]))
             return {"skipped": True, "category": (entry.category.value if entry.category else "verified"),
-                    "proposals": 0, "flagged": bool(reported)}
+                    "proposals": 0, "flagged": bool(flags)}
 
         n = 0
         for finding in comparison.findings:
