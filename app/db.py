@@ -101,6 +101,7 @@ CREATE INDEX IF NOT EXISTS ix_chunk_doc ON doc_chunk(document_id);
 CREATE TABLE IF NOT EXISTS api_key (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_prefix TEXT NOT NULL,
   source_scope TEXT, created_by TEXT, created_at TEXT NOT NULL, revoked_at TEXT, last_used_at TEXT);
+CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 """
 
 
@@ -152,6 +153,8 @@ class Database:
         with self.tx() as t:
             for stmt in [s.strip() for s in DDL.split(";") if s.strip()]:
                 t.run(stmt)
+            from app.migrations import migrate
+            migrate(t)
 
     @contextmanager
     def tx(self) -> Iterator["Tx"]:

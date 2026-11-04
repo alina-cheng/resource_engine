@@ -1,1 +1,1 @@
-Vendored HSDS 3.2.3 SUBSET (hand-authored). Replace with the official files via scripts/fetch_hsds_schemas.py before production use.
+Official Open Referral HSDS v3.2.3 schemas, copied from the existing One Degree engine (upstream tag v3.2.3, commit 74fcf85). Licensed CC BY-SA 4.0; see LICENSE. Do not replace with generated subsets.

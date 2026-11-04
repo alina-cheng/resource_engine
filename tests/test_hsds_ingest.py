@@ -26,7 +26,18 @@ class MappingTests(unittest.TestCase):
 
     def test_every_sample_record_maps_to_valid_hsds(self):
         self.assertEqual(self._all_valid(OdrsAdapter(ODRS, self.c.settings), ODRS), 50)
-        self.assertEqual(self._all_valid(NdpAdapter(NDP, self.c.settings), NDP), 20)
+        # Isolate four invalid address objects while preserving their valid organizations/services.
+        run = self.c.ingest.run(NDP)
+        self.assertEqual((run["received"], run["stored"], run["quarantined"]), (20, 20, 0))
+        self.assertEqual(run["partial_records"], 6)
+        self.assertEqual(run["objects_quarantined"], 7)
+        self.assertEqual(run["objects_received"], run["objects_stored"] + run["objects_quarantined"])
+        for row in self.c.db.q("SELECT type,data FROM resource"):
+            self.assertEqual(self.v.errors(row["type"], json.loads(row["data"])), [])
+        reasons = [r["reason"] for r in self.c.db.q("SELECT reason FROM quarantine")]
+        self.assertEqual(len(reasons), 7)
+        self.assertEqual(sum(reason.startswith("address ") and "required property" in reason for reason in reasons), 4)
+        self.assertEqual(sum(reason.startswith("phone ") and "contains no digits" in reason for reason in reasons), 3)
 
     def test_ids_are_deterministic_uuids(self):
         a = OdrsAdapter(ODRS, self.c.settings)
@@ -48,7 +59,8 @@ class MappingTests(unittest.TestCase):
         sched = [s for b in a.fetch() for rec in b.records for r in a.map(rec).resources if r.type == "service" for s in r.data.get("schedules", []) if s.get("opens_at")]
         self.assertTrue(sched)
         self.assertRegex(sched[0]["opens_at"], r"^\d{2}:\d{2}[+-]\d{2}:\d{2}$")
-        self.assertEqual(sched[0]["timezone"], "America/Los_Angeles")
+        self.assertEqual(sched[0]["x_resource_engine"]["local_schedule"]["timezone"], "America/Los_Angeles")
+        self.assertNotIn("timezone", sched[0])
 
     def test_org_description_gap_policies(self):
         a = OdrsAdapter(ODRS, self.c.settings)

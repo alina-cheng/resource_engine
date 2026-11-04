@@ -31,6 +31,8 @@ class Mapped:
     native_id: str
     resources: list[Resource]
     warnings: list[str] = field(default_factory=list)
+    quarantined_objects: list[tuple[str, dict, list[str]]] = field(default_factory=list)
+    objects_received: int = 0
 
 
 @dataclass
