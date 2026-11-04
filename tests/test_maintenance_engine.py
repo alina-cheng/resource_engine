@@ -291,6 +291,6 @@ class StructuredPatchTranslation(unittest.TestCase):
         c.db.run("INSERT INTO resource (id,type,org_id,source,status,data,version,created_at,updated_at,deleted) "
                  "VALUES (?,?,?,?,?,?,?,?,?,0)",
                  (sid, "service", None, "t", "active",
-                  dumps({"id": sid, "name": "X", "status": "active"}), 1, now_iso(), now_iso()))
+                  dumps({"id": sid, "organization_id": str(uuid.uuid4()), "name": "X", "status": "active"}), 1, now_iso(), now_iso()))
         self.assertEqual(c.store.validate_patch(sid, {"status": "defunct"}), [])            # valid HSDS status
         self.assertEqual(c.store.validate_patch(sid, {"status": "temporarily closed"}), []) # valid HSDS status

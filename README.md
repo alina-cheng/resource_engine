@@ -23,4 +23,4 @@ Or `docker compose up --build`. Demo accounts and a guided tour: [docs/local-run
 
 ## Status: read this first
 Tested locally: ingest, HSDS mapping and validation, approvals, history, HSDS API, chat, matching, documents, maintenance (40 tests, plus a browser walk-through of all three personas).
-**Not tested here:** PostgreSQL, Cognito, S3, Bedrock, OpenSearch, Textract, live website fetching, Terraform apply. **HSDS schemas are a vendored subset**: run `make schemas` for the official files. **Personal data** needs a privacy review. Full list: [docs/known-limitations.md](docs/known-limitations.md).
+**Not tested here:** PostgreSQL, Cognito, S3, Bedrock, OpenSearch, Textract, live website fetching, Terraform apply. HSDS validation uses the official v3.2.3 schemas in `schemas/hsds/3.2.3/`. **Personal data** needs a privacy review. Full list: [docs/known-limitations.md](docs/known-limitations.md).

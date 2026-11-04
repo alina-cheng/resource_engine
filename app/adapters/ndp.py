@@ -56,7 +56,7 @@ class NdpAdapter(SourceAdapter):
             if skip >= (data.get("input") or {}).get("countAvailable", 0):
                 return
 
-    def map(self, rec: dict) -> Mapped:
+    def _enriched_map(self, rec: dict) -> Mapped:
         src, tz = self.name, self.settings.default_timezone
         if not rec.get("id") or not rec.get("name"):
             raise MappingError("organization has no id/name")
@@ -173,3 +173,8 @@ class NdpAdapter(SourceAdapter):
         if len(tax.resources) > 1:
             resources.extend(tax.resources)
         return Mapped(str(rec["id"]), resources, warnings)
+
+
+    def map(self, record: dict) -> Mapped:
+        from app.adapters.canonical import map_record
+        return map_record(self, record)
