@@ -8,7 +8,18 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 make demo            # generates data, loads it, seeds demo users, serves http://127.0.0.1:8000
 ```
-`make demo` runs `python -m app.demo --reset`: it generates ~236 source records, imports them (ODRS + NDP), creates demo users, policy documents, help requests and API keys, runs one AI maintenance pass, then serves the app.
+`make demo` runs `python -m app.demo --reset`: it generates ~236 fake source records, imports them (ODRS + NDP), creates demo users, policy documents, help requests and API keys, runs one AI maintenance pass, then serves the app. It uses `config/sources.demo.json` and its own folder, `var/demo`, so it never touches a real import.
+
+## Real data
+Real imports use `config/sources.json`: ODRS comes from the live API and NDP from the two files in `data/samples`. Put the key in `.env` as `ODRS_API_KEY=...`, then:
+```bash
+set -a; source .env; set +a
+python -m app.jobs.run seed-demo --no-maintenance   # imports real data if the database is empty, adds demo logins
+make run                                            # http://127.0.0.1:8000
+```
+The admin and help seeker demo accounts work on real data. Provider accounts are not created, because they belong to the fake organizations. `max_pages` in `sources.json` limits ODRS to about 1,000 records; remove it to pull all of them (about 24,000).
+
+Leave out `--no-maintenance` only if `WEBSITE_BACKEND=live` is set: by default the AI check reads fake websites and reports false problems on real records.
 
 ## Option B: Docker
 ```bash
@@ -35,9 +46,8 @@ Providers 2 to 5 follow the pattern `provider2@demo.org` / `demo-provider-2` (Tr
 
 ## Useful commands
 ```bash
-make test                                   # 40 tests
-python -m tools.sample_data_generator --odrs 1000 --ndp 500 --seed 1   # bigger data set
-python -m app.jobs.run import               # run an import from the CLI
+make test                                   # full suite, about 4 minutes
+python -m tools.sample_data_generator --odrs 1000 --ndp 500 --seed 1   # bigger fake data set
 python -m app.jobs.run maintenance --limit 50 --force
 python -m app.jobs.run reindex
 ```

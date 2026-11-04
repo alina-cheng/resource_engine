@@ -6,6 +6,7 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,9 @@ def main() -> None:
     ap.add_argument("--reset", action="store_true")
     ap.add_argument("--no-serve", action="store_true")
     a = ap.parse_args()
+    # The demo runs on generated data in its own folder, so --reset cannot wipe a real import.
+    os.environ.setdefault("SOURCES_CONFIG", str(ROOT / "config" / "sources.demo.json"))
+    os.environ.setdefault("DATA_DIR", str(ROOT / "var" / "demo"))
     s = load_settings()
     if a.reset and s.data_dir.exists():
         shutil.rmtree(s.data_dir)

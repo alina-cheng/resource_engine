@@ -1,6 +1,7 @@
 [
-  {"name": "odrs", "adapter": "odrs", "location": "data/generated/odrs/*.json", "enabled": true,
-   "options": {"bearer_env": "ODRS_TOKEN"}},
-  {"name": "ndp", "adapter": "ndp", "location": "data/generated/ndp/*.json", "enabled": true,
-   "options": {"bearer_env": "NDP_TOKEN", "take": 100}}
+  {"name": "odrs", "adapter": "odrs", "location": "https://rbg.1degree.org:3002/v1/opportunities", "enabled": true,
+   "options": {"api_key_env": "ODRS_API_KEY", "per_page": 100, "max_pages": 10,
+               "organizations_url": "https://rbg.1degree.org:3002/v1/organizations"}},
+  {"name": "ndp", "adapter": "ndp", "location": "data/samples/national-data-platform-sample-*.json", "enabled": true,
+   "options": {}}
 ]

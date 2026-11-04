@@ -30,7 +30,7 @@ terraform apply -var image_tag=v1
 
 ## 3. First-run tasks
 - Create the first admin: `aws cognito-idp admin-create-user --user-pool-id <id> --username you@org --user-attributes Name=email,Value=you@org Name=email_verified,Value=true` then `admin-add-user-to-group --group-name admin`.
-- Edit `config/sources.json` so `location` points at the real ODRS and NDP endpoints and set `bearer_env` secrets (add `ODRS_TOKEN`, `NDP_TOKEN` to the task definition `secrets`).
+- `config/sources.json` reads ODRS from the live API and NDP from the two files in `data/samples`. Store the ODRS key in Secrets Manager, add it to the task definition `secrets` as `ODRS_API_KEY`, and allow the execution role to read it (not yet in Terraform).
 - Run the first import: admin UI → Imports, or `aws ecs run-task ... --overrides` with `python -m app.jobs.run import`. Then run maintenance.
 - Replace the vendored HSDS schema subset with the official files before go-live (`make schemas`, commit the result).
 
