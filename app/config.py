@@ -19,7 +19,7 @@ class Settings:
     data_dir: Path = ROOT / "var"
     database_url: str = ""                      # sqlite:///path | postgresql://...
     auth_mode: str = "local"                    # local | cognito
-    jwt_secret: str = "dev-only-change-me"
+    jwt_secret: str = "local-development-secret-change-before-deploy"
     token_ttl_minutes: int = 480
     hsds_version: str = "3.2.3"
     hsds_schema_dir: Path = ROOT / "schemas" / "hsds" / "3.2.3"
@@ -27,7 +27,7 @@ class Settings:
     blob_backend: str = "local"                 # local | s3
     s3_bucket: str = ""
     llm_backend: str = "mock"                   # mock | bedrock
-    bedrock_model_id: str = "anthropic.claude-3-5-haiku-20241022-v1:0"
+    bedrock_model_id: str = ""
     aws_region: str = "us-west-2"
     website_backend: str = "sample"             # sample | live
     website_samples_path: Path = ROOT / "data" / "generated" / "websites.json"
@@ -60,19 +60,23 @@ def _database_url(data_dir: Path) -> str:
 
 def load_settings() -> Settings:
     data_dir = Path(_env("DATA_DIR", str(ROOT / "var")))
+    if _env("APP_ENV", "local") != "local" and len(os.environ.get("JWT_SECRET", "")) < 32:
+        raise ValueError("Set a unique JWT_SECRET of at least 32 characters outside local mode")
+    if _env("LLM_BACKEND", "mock") == "bedrock" and not os.environ.get("BEDROCK_MODEL_ID", "").strip():
+        raise ValueError("Set BEDROCK_MODEL_ID to a model or inference profile available in this AWS account")
     return Settings(
         env=_env("APP_ENV", "local"),
         data_dir=data_dir,
         database_url=_database_url(data_dir),
         auth_mode=_env("AUTH_MODE", "local"),
-        jwt_secret=_env("JWT_SECRET", "dev-only-change-me"),
+        jwt_secret=_env("JWT_SECRET", "local-development-secret-change-before-deploy"),
         token_ttl_minutes=int(_env("TOKEN_TTL_MINUTES", "480")),
         hsds_schema_dir=Path(_env("HSDS_SCHEMA_DIR", str(ROOT / "schemas" / "hsds" / "3.2.3"))),
         default_timezone=_env("DEFAULT_TIMEZONE", "America/Los_Angeles"),
         blob_backend=_env("BLOB_BACKEND", "local"),
         s3_bucket=_env("S3_BUCKET", ""),
         llm_backend=_env("LLM_BACKEND", "mock"),
-        bedrock_model_id=_env("BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0"),
+        bedrock_model_id=_env("BEDROCK_MODEL_ID", ""),
         aws_region=_env("AWS_REGION", "us-west-2"),
         website_backend=_env("WEBSITE_BACKEND", "sample"),
         website_samples_path=Path(_env("WEBSITE_SAMPLES_PATH", str(ROOT / "data" / "generated" / "websites.json"))),

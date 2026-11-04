@@ -48,7 +48,7 @@ export async function recordEditor(rid, { mode, onSaved }) {
     try {
       const patch = collect();
       if (!Object.keys(patch).length) return toast("No changes to save.");
-      if (mode === "admin") { await api(base, { method: "PUT", body: { patch } }); toast("Saved. Change history updated."); }
+      if (mode === "admin") { await api(base, { method: "PUT", body: { patch, expected_version: rec.version } }); toast("Saved. Change history updated."); }
       else { await api("/provider/change-requests", { method: "POST", body: { resource_id: rid, patch } }); toast("Sent for One Degree review."); }
       onSaved && onSaved();
     } catch (e) { errs.replaceChildren(e.status ? errBox(e) : h("div", { class: "err" }, e.message)); }

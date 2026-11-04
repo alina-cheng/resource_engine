@@ -17,7 +17,7 @@ IDs are referenced by tests (`docs/test-plan.md`) and Kiro specs.
 | ID | Requirement | Priority |
 |---|---|---|
 | BR-1 | Import data from the ODRS and NDP formats, on a schedule and on demand by an admin; keep each payload exactly as received | Must |
-| BR-2 | Every stored record validates against the pinned HSDS version; records that cannot be converted are quarantined with the reason; received = stored + quarantined | Must |
+| BR-2 | Every stored HSDS object validates against the pinned schema. Invalid objects and dependent children are isolated with reasons; valid independent data is retained. Unmappable sources/write failures are whole-source quarantine. Source and mapped-object counts balance separately, and partial imports are explicit | Must |
 | BR-3 | Re-running an import never duplicates records and never silently overwrites a human or AI change; clashes are shown to an admin | Must |
 | BR-4 | Every change to stored data records who, what (old and new value), when and why | Must |
 | BR-5 | Provider edits do not take effect until an admin approves them | Must |

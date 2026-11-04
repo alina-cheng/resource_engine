@@ -8,3 +8,12 @@ __pycache__/
 *.tfstate*
 *.tfplan
 .pytest_cache/
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+*.dump
+*.backup
+crash.log
+local_refs/
+onedegree_resource_engine/

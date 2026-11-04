@@ -40,7 +40,7 @@ class MaintenanceService:
         self._site = WebsiteSourceAdapter(website)
         # The grounded Bedrock extractor runs only when a real (non-mock) LLM is configured;
         # otherwise the offline rule extractor supplies facts, so tests and the demo need no model.
-        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker()
+        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker(model_id=settings.bedrock_model_id)
         self._rule_facts = None if not getattr(llm, "is_mock", True) else _RuleFactSource(extractor)
         self.reports = ReportService(db)
 
@@ -74,18 +74,22 @@ class MaintenanceService:
             rows = [r for r in extra if r and r["type"] == "service"] + [r for r in due if r]
         counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0, "user_reported": 0}
         cache: dict[str, object] = {}
-        for row in rows:
-            # A reported record is force-checked (bypass the unchanged-page skip) and flagged.
-            row_reported = row["id"] in reported
-            out = self.check_service(row, cache, run_id, force or row_reported, reported=row_reported)
-            counts["checked"] += 1
-            if out.get("flagged"):
-                counts["user_reported"] += 1
-            if out.get("skipped"):
-                counts["skipped_unchanged"] += 1
-            else:
-                counts[out["category"]] += 1
-                counts["proposals"] += out["proposals"]
+        try:
+            for row in rows[:limit] if limit is not None else rows:
+                row_reported = row["id"] in reported
+                out = self.check_service(row, cache, run_id, force or row_reported, reported=row_reported)
+                counts["checked"] += 1
+                if out.get("flagged"):
+                    counts["user_reported"] += 1
+                if out.get("skipped"):
+                    counts["skipped_unchanged"] += 1
+                else:
+                    counts[out["category"]] += 1
+                    counts["proposals"] += out["proposals"]
+        except Exception as error:
+            self.db.run("UPDATE maintenance_run SET finished_at=?,status='failed',counts=? WHERE id=?",
+                        (now_iso(), dumps(counts | {"error": type(error).__name__}), run_id))
+            raise
         self.db.run("UPDATE maintenance_run SET finished_at=?, status='completed', counts=? WHERE id=?", (now_iso(), dumps(counts), run_id))
         return {"run_id": run_id, **counts}
 
@@ -94,7 +98,17 @@ class MaintenanceService:
         org = self.store.get(svc["org_id"]) if svc["org_id"] else None
         sals = [r for r in self.db.q("SELECT data FROM resource WHERE type='service_at_location' AND deleted=0 AND org_id=?", (svc["org_id"],))
                 if loads(r["data"]).get("service_id") == svc["id"]]
-        locs = [x["data"] for x in self.store.get_many([loads(r["data"])["location_id"] for r in sals]).values()]
+        locations = self.store.get_many([loads(r["data"])["location_id"] for r in sals])
+        locs = []
+        for sal in sals:
+            link = loads(sal["data"])
+            location = locations.get(link["location_id"])
+            if location:
+                loc = dict(location["data"])
+                for field in ("schedules", "phones", "accessibility"):
+                    if link.get(field):
+                        loc[field] = list(loc.get(field, [])) + list(link[field])
+                locs.append(loc)
         return org, locs
 
     def _prior_entry(self, svc: dict) -> CheckLogEntry | None:

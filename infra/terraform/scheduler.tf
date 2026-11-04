@@ -16,7 +16,7 @@ resource "aws_iam_role_policy" "scheduler" {
   role = aws_iam_role.scheduler.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["ecs:RunTask"], Resource = "arn:aws:ecs:${var.region}:${data.aws_caller_identity.me.account_id}:task-definition/${local.name}:*" },
-    { Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.execution.arn, aws_iam_role.task.arn] }] })
+  { Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.execution.arn, aws_iam_role.task.arn] }] })
 }
 locals {
   jobs = {
@@ -25,7 +25,7 @@ locals {
   }
 }
 resource "aws_scheduler_schedule" "job" {
-  for_each                     = local.jobs
+  for_each                     = var.schedules_enabled ? local.jobs : {}
   name                         = "${local.name}-${each.key}"
   schedule_expression          = each.value.schedule
   schedule_expression_timezone = "UTC"

@@ -108,12 +108,34 @@ function authForm(kind) {
   const signup = kind === "signup", fromChat = params().from === "chat";
   const err = h("div"), name = h("input", { autocomplete: "name" }), email = h("input", { type: "email", autocomplete: "email" }),
     pw = h("input", { type: "password", autocomplete: signup ? "new-password" : "current-password" });
+  const finish = async (res) => {
+    if (res.challenge) {
+      const password = res.challenge === "NEW_PASSWORD_REQUIRED";
+      const answer = h("input", { type: password ? "password" : "text", autocomplete: password ? "new-password" : "one-time-code" });
+      const error = h("div");
+      const attrs = Object.fromEntries((res.required_attributes || []).map((key) => [key, h("input")]));
+      modal(password ? "Choose your new password" : "Enter your verification code",
+        h("div", null, error, h("label", null, password ? "New password" : "Verification code"), answer,
+          Object.entries(attrs).map(([key, input]) => h("label", null, key.replaceAll("_", " "), input))),
+        [h("button", { onclick: async () => {
+          try {
+            const next = await api("/auth/challenge", { method: "POST", body: {
+              challenge_token: res.challenge_token, answer: answer.value,
+              attributes: Object.fromEntries(Object.entries(attrs).map(([key, input]) => [key, input.value])),
+            } });
+            closeModal(); await finish(next);
+          } catch (e) { error.replaceChildren(errBox(e)); }
+        } }, "Continue")]);
+      return;
+    }
+    setSession(res); await boot(true);
+    location.hash = fromChat && res.user.role === "seeker" ? "#/?resume=1" : ROLE_HOME[res.user.role];
+  };
   const go = async () => {
     err.replaceChildren();
     try {
       const res = await api(signup ? "/auth/register" : "/auth/login", { method: "POST", body: { name: name.value, email: email.value, password: pw.value } });
-      setSession(res); await boot(true);
-      location.hash = fromChat && res.user.role === "seeker" ? "#/?resume=1" : ROLE_HOME[res.user.role];
+      await finish(res);
     } catch (e) { err.replaceChildren(errBox(e)); }
   };
   app.replaceChildren(page(h("div", { class: "narrow" }, h("h1", null, signup ? "Create your profile" : "Log in"),

@@ -6,7 +6,7 @@ resource "aws_ecr_repository" "app" {
 resource "aws_ecr_lifecycle_policy" "app" {
   repository = aws_ecr_repository.app.name
   policy = jsonencode({ rules = [{ rulePriority = 1, description = "keep last 20",
-    selection = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 20 }, action = { type = "expire" } }] })
+  selection = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 20 }, action = { type = "expire" } }] })
 }
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/${local.name}"
@@ -35,7 +35,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 resource "aws_iam_role_policy" "execution_secrets" {
   role = aws_iam_role.execution.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["secretsmanager:GetSecretValue"],
-    Resource = [aws_secretsmanager_secret.jwt.arn, aws_rds_cluster.this.master_user_secret[0].secret_arn] }] })
+  Resource = concat([aws_secretsmanager_secret.jwt.arn, aws_rds_cluster.this.master_user_secret[0].secret_arn], values(var.source_token_secret_arns)) }] })
 }
 resource "aws_iam_role" "task" {
   name               = "${local.name}-task"
@@ -117,6 +117,8 @@ locals {
     { name = "LLM_BACKEND", value = var.llm_backend },
     { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
     { name = "WEBSITE_BACKEND", value = var.website_backend },
+    { name = "ODRS_API_URL", value = var.odrs_api_url },
+    { name = "NDP_API_URL", value = var.ndp_api_url },
     { name = "SEARCH_BACKEND", value = var.enable_opensearch ? "opensearch" : "memory" },
     { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch ? "https://${aws_opensearch_domain.this[0].endpoint}" : "" },
     { name = "JOB_RUNNER", value = "ecs" },
@@ -140,13 +142,19 @@ resource "aws_ecs_task_definition" "app" {
     essential    = true
     portMappings = [{ containerPort = 8000 }]
     environment  = local.app_env
-    secrets = [
+    secrets = concat([
       { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt.arn },
       { name = "DB_USER", valueFrom = "${aws_rds_cluster.this.master_user_secret[0].secret_arn}:username::" },
       { name = "DB_PASSWORD", valueFrom = "${aws_rds_cluster.this.master_user_secret[0].secret_arn}:password::" },
-    ]
+    ], [for name, arn in var.source_token_secret_arns : { name = name, valueFrom = arn }])
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.app.name, awslogs-region = var.region, awslogs-stream-prefix = "app" } }
   }])
+  lifecycle {
+    precondition {
+      condition     = var.llm_backend != "bedrock" || var.bedrock_model_id != ""
+      error_message = "Set bedrock_model_id to an account-enabled model or inference profile before deploying Bedrock."
+    }
+  }
 }
 resource "aws_ecs_service" "app" {
   name            = local.name

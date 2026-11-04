@@ -1,14 +1,13 @@
 # Run locally and visualize
 
-Needs Python 3.12 only. No database, AWS account or API keys.
+Needs uv and Python 3.12. SQLite demo needs no external database, AWS account or API keys.
 
 ## Option A: Python
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
+uv sync --frozen
 make demo            # generates data, loads it, seeds demo users, serves http://127.0.0.1:8000
 ```
-`make demo` runs `python -m app.demo --reset`: it generates ~236 source records, imports them (ODRS + NDP), creates demo users, policy documents, help requests and API keys, runs one AI maintenance pass, then serves the app.
+`make demo` runs `uv run --frozen python -m app.demo`: it generates ~236 source records, imports valid HSDS objects (ODRS + NDP), isolates invalid objects with dependency cascades, creates demo users, policy documents, help requests and API keys, runs one AI maintenance pass, then serves the app. Existing databases are preserved; it no longer resets data on each invocation.
 
 ## Option B: Docker
 ```bash
@@ -35,10 +34,12 @@ Providers 2 to 5 follow the pattern `provider2@demo.org` / `demo-provider-2` (Tr
 
 ## Useful commands
 ```bash
-make test                                   # 40 tests
+make test                                   # pytest; PostgreSQL checks skip without TEST_DATABASE_URL
 python -m tools.sample_data_generator --odrs 1000 --ndp 500 --seed 1   # bigger data set
 python -m app.jobs.run import               # run an import from the CLI
 python -m app.jobs.run maintenance --limit 50 --force
 python -m app.jobs.run reindex
 ```
 Set `LLM_BACKEND=bedrock` (with AWS credentials) to use Bedrock for chat answers and website extraction; `WEBSITE_BACKEND=live` to fetch real websites. The defaults need neither.
+
+Set an account-enabled `BEDROCK_MODEL_ID` before choosing Bedrock; no default model is guessed. For PostgreSQL regression tests set `TEST_DATABASE_URL` to a local disposable test database, then run `make test`; each integration test creates/removes its own schema. `scripts/verify_postgres_restart.py prepare|verify` preserves a local receipt around an operator-controlled actual database restart. Do not run test helpers on a production database.

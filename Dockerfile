@@ -1,8 +1,10 @@
 FROM python:3.12-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy
+ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /srv
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
 COPY app app
 COPY frontend frontend
 COPY schemas schemas
@@ -11,7 +13,7 @@ COPY content content
 COPY tools tools
 COPY scripts scripts
 COPY data/samples data/samples
-RUN useradd -r -u 10001 app && mkdir -p /data && chown app /data
+RUN python -m tools.sample_data_generator --out /srv/data/generated && useradd -m -u 10001 app && mkdir -p /data && chown app /data
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health')"

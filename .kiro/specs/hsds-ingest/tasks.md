@@ -6,7 +6,10 @@
 - [x] Deterministic ids and idempotent re-import
 - [x] Three-way reconciliation and conflict requests
 - [x] Schedules with UTC offset and timezone
-- [ ] Replace vendored schemas with official v3.2.3 and fix rejects
+- [x] Replace vendored schemas with official v3.2.3 and fix rejects without relaxing schema
+- [x] Restore original core transforms/IDs plus valid FINAL enrichment
+- [x] Restore object-level and parent-dependent quarantine, separate source/object counts and partial-import UI
+- [ ] Revalidate final combined integration after partial-import policy change
 - [ ] HTTP transports verified against live ODRS and NDP endpoints
 - [ ] Deletion handling for records removed at the source
 - [ ] Cross-source deduplication using provenance links

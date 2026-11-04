@@ -93,7 +93,7 @@ def build_engine_record(store, db, svc: dict, org: dict | None, locs: list[dict]
         for a in d["service_areas"]:
             a = dict(a)
             name = str(a.get("name", "")).strip()
-            if a.get("extent_type") == "county" and name and "county" not in name.lower():
+            if (a.get("extent_type") == "county" or a.get("description") == "county") and name and "county" not in name.lower():
                 a["name"] = f"{name} County"
             areas.append(a)
         record["service_areas"] = areas
@@ -223,7 +223,7 @@ def _structured_patch(svc: dict, finding: Finding):
             {"id": make_id("maint", "phone", sid, n), "service_id": sid, "number": n, "type": "voice"}
             for n in dict.fromkeys(numbers)
         ]
-        return (current or [], proposed or (current or []))
+        return (current, proposed or current)
 
     if field == "service_areas":
         # Proposed display is "A County; B County" (or comma-separated county names).
@@ -235,7 +235,7 @@ def _structured_patch(svc: dict, finding: Finding):
              "extent_type": "county"}
             for name in dict.fromkeys(names)
         ]
-        return (current or [], proposed)
+        return (current, proposed)
 
     if field == "languages":
         names = [p.strip() for p in re.split(r"[;,]", proposed_text) if p.strip()]
@@ -243,7 +243,7 @@ def _structured_patch(svc: dict, finding: Finding):
             {"id": make_id("maint", "lang", sid, name), "service_id": sid, "name": name}
             for name in dict.fromkeys(names)
         ]
-        return (current or [], proposed or (current or []))
+        return (current, proposed or current)
 
     if field in ("minimum_age", "maximum_age"):
         try:
@@ -251,6 +251,20 @@ def _structured_patch(svc: dict, finding: Finding):
         except (AttributeError, ValueError):
             proposed = proposed_text
         return (current, proposed)
+
+    if field == "schedules":
+        from app.adapters.common import weekly_schedules
+        from app.hsds.normalize import normalize_document
+        intervals = {}
+        for day, opens, closes in re.findall(r"\b(MO|TU|WE|TH|FR|SA|SU)\s+(\d{2}:\d{2})-(\d{2}:\d{2})", proposed_text):
+            intervals.setdefault(day, []).append((opens, closes))
+        if not intervals:
+            raise FindingRejected("hours need structured day and time intervals")
+        schedules = weekly_schedules("maint", sid, {"service_id": sid}, intervals, "America/Los_Angeles")
+        return current, normalize_document({"schedules": schedules})["schedules"]
+
+    if field == "accessibility":
+        return current, [{"id": make_id("maint", "accessibility", sid, proposed_text), "description": proposed_text}]
 
     # status, email, eligibility_description, schedules, accessibility: use the display value.
     # For status, map the engine's "defunct"/"temporarily closed" to the stored vocabulary.
@@ -261,4 +275,5 @@ def _structured_patch(svc: dict, finding: Finding):
 
 
 def _is_county(area: dict) -> bool:
-    return "county" in str(area.get("name", "")).lower() or area.get("extent_type") == "county"
+    return ("county" in str(area.get("name", "")).lower() or area.get("extent_type") == "county"
+            or area.get("description") == "county")

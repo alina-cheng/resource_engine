@@ -7,5 +7,6 @@
 - `app/services/maintenance.py` drives the engine; `check_result` stores latest result, page hash, record version and review `flags`.
 - **User reports** `app/maintenance/reports.py` (`ReportService`): `user_report` table; a report forces a recheck and raises the single `user_reported` flag. Endpoints `POST /api/reports`, `GET /admin/reports`, resolve, in `app/web/routes_app.py`; admin "Reports" view in `frontend/admin.js`.
 - Scheduling: EventBridge Scheduler runs `python -m app.jobs.run maintenance`.
+- Integration preserves exact missing-field baselines (None is not changed into []), converts hours/accessibility proposals to valid typed HSDS, includes per-service location-link hours in comparisons, and recognizes original NDP county descriptions. Maintenance failures close the run as failed; batch limits also bound report-forced checks. Prompt text/grounding behavior is unchanged; configured model ID is passed explicitly to BedrockInvoker.
 
 See `docs/decisions.md` (ADR-9, ADR-10) for the port and report-trigger decisions, `docs/detailed-design.md` for diagrams and `docs/technical-spec.md` for algorithms.

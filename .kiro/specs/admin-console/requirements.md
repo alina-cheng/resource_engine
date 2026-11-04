@@ -10,6 +10,6 @@ As an admin, I run imports and checks, review proposals with evidence, edit data
 2. WHEN an admin opens the review queue THE SYSTEM SHALL show current and proposed values side by side with evidence and a stale warning.
 3. THE SYSTEM SHALL list all records filterable by category and source with last-checked time and a verified marker.
 4. THE SYSTEM SHALL let an admin see seeker and provider profiles and create provider logins linked to an organization.
-5. THE SYSTEM SHALL show import runs, whether they balance, and quarantined records.
+5. THE SYSTEM SHALL show import runs, separate source-record and mapped-object balance, partial-source counts, held-object counts and quarantine reasons.
 6. THE SYSTEM SHALL let an admin create, scope and revoke API keys.
 7. THE SYSTEM SHALL list user-reported listings with the reporter's note, link each to its record, and let an admin mark a report resolved; the overview SHALL show the count of open reports.

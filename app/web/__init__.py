@@ -8,8 +8,9 @@ from app.config import ROOT, Settings
 from app.container import Container, build_container
 from app.services.chat import ConsentRequired
 from app.services.proposals import Stale
-from app.services.store import ValidationFailed
+from app.services.store import Conflict, ValidationFailed
 from app.services.users import AuthError, Principal
+from app.jobs.runner import JobError
 
 FRONTEND = ROOT / "frontend"
 
@@ -49,6 +50,14 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     @app.errorhandler(Stale)
     def _stale(e):
         return err(409, str(e), stale_fields=e.fields)
+
+    @app.errorhandler(Conflict)
+    def _conflict(e):
+        return err(409, str(e))
+
+    @app.errorhandler(JobError)
+    def _job(e):
+        return err(502, str(e))
 
     @app.errorhandler(ConsentRequired)
     def _consent(e):

@@ -2,10 +2,17 @@
 from __future__ import annotations
 from app.db import loads
 from app.services.store import HsdsStore
+from app.hsds.normalize import normalize_document
 
 
 def strip_ext(data: dict, keep: bool = False) -> dict:
-    return dict(data) if keep else {k: v for k, v in data.items() if not k.startswith("x_")}
+    def clean(value):
+        if isinstance(value, dict):
+            return {k: clean(v) for k, v in value.items() if keep or not k.startswith("x_")}
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        return value
+    return clean(normalize_document(data))
 
 
 class Views:

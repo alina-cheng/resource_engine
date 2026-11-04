@@ -1,0 +1,9 @@
+# Copy to workshop.tfvars (ignored), select an available model and review a plan.
+region             = "us-west-2"
+workshop_mode      = true
+schedules_enabled = false
+bedrock_model_id   = "REPLACE_WITH_ACCOUNT_ENABLED_MODEL_OR_INFERENCE_PROFILE"
+odrs_api_url       = ""
+ndp_api_url        = ""
+# Source tokens are existing Secrets Manager ARNs, never token values:
+# source_token_secret_arns = { ODRS_TOKEN = "arn:aws:secretsmanager:..." }

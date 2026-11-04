@@ -69,15 +69,12 @@ sequenceDiagram
     I->>A: map(record)
     A-->>I: HSDS objects
     I->>S: validate all objects
-    alt invalid
-      I->>Q: quarantine record + reason
-    else valid
-      I->>S: upsert in one transaction (3-way merge per field)
-      S-->>I: created / updated / clashes
-      I->>I: clashes -> change_request(kind=conflict)
-    end
+    I->>I: partition valid objects; cascade invalid-parent failures
+    I->>Q: preserve held objects + reasons
+    I->>S: accepted graph + quarantine evidence + conflicts in one transaction
+    S-->>I: created / updated / clashes / partial
   end
-  I->>I: assert received = stored + quarantined
+  I->>I: assert source-record balance and mapped-object balance separately
 ```
 
 ## 4. Data flow: AI maintenance and approval
@@ -101,7 +98,7 @@ sequenceDiagram
     M->>CR: create ai_finding (evidence required)
   end
   Adm->>CR: approve / reject
-  CR->>CR: stale check
+  CR->>CR: claim pending decision and lock baseline in one transaction
   CR->>S: apply_patch (validate, history)
 ```
 
@@ -127,6 +124,8 @@ Provider side: `provider_needs` lists direct requests and unassigned needs whose
 
 ## 6. Deployment view
 One VPC, two public subnets (ALB, Fargate tasks; no NAT) and two private subnets (Aurora). Security groups: ALB open on 80/443; app only from ALB; database only from app. Scheduled jobs use the same task definition with a command override.
+
+`infra/bootstrap` prepares encrypted/versioned state and repository-scoped OIDC. Workshop access uses expiring event credentials and must follow event region/service restrictions. Web job starts return a durable job ID and admin UI polls status; one-off ECS tasks read stored parameters. Cognito first-password/MFA challenges complete before application login. `schema_migration` tracks workflow/compatibility upgrades; resource IDs/history survive upgrades.
 
 ## 7. Design decisions
 See `docs/decisions.md`.

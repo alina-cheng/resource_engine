@@ -46,7 +46,7 @@ class OdrsAdapter(SourceAdapter):
             url = (data.get("paging") or {}).get("next_page")
             page += 1
 
-    def map(self, opp: dict) -> Mapped:
+    def _enriched_map(self, opp: dict) -> Mapped:
         src = self.name
         org = opp.get("organization") or {}
         if not org.get("id") or not org.get("name"):
@@ -213,3 +213,8 @@ class OdrsAdapter(SourceAdapter):
                 seen.add((r.type, r.id))
                 uniq.append(r)
         return Mapped(str(opp["id"]), uniq, warnings)
+
+
+    def map(self, record: dict) -> Mapped:
+        from app.adapters.canonical import map_record
+        return map_record(self, record)
