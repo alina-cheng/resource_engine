@@ -76,8 +76,9 @@ def seed_demo(c, run_maintenance: bool = True) -> dict:
             c.db.run("INSERT INTO api_key (id,name,key_hash,key_prefix,source_scope,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
                      (new_id(), name, hash_key(key), key[:8], scope, "seed-demo", now_iso()))
             out.setdefault("api_keys", {})[name] = key
-    # user reports: demo the admin "reports" view. A report forces a fresh AI check of the
-    # record and raises the `user_reported` flag for a specialist.
+    # user reports: demo the admin "reports" view. A report selects the record for the next run
+    # and raises the `user_reported` flag for a specialist; the AI re-reviews only if the page
+    # changed since the last review (it respects the hash-skip).
     if not c.db.one("SELECT 1 AS x FROM user_report LIMIT 1"):
         uid = lambda e: (c.users.by_email(e) or {}).get("id")
         demo_reports = [

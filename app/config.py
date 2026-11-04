@@ -27,7 +27,7 @@ class Settings:
     blob_backend: str = "local"                 # local | s3
     s3_bucket: str = ""
     llm_backend: str = "mock"                   # mock | bedrock
-    bedrock_model_id: str = "anthropic.claude-3-5-haiku-20241022-v1:0"
+    bedrock_model_id: str = "us.anthropic.claude-haiku-5-5"
     aws_region: str = "us-west-2"
     website_backend: str = "sample"             # sample | live
     website_samples_path: Path = ROOT / "data" / "generated" / "websites.json"
@@ -40,6 +40,8 @@ class Settings:
     import_interval_minutes: int = 1440
     maintenance_interval_minutes: int = 1440
     maintenance_recheck_days: int = 30
+    maintenance_safety_factor: float = 1.2      # headroom on the self-sized daily batch
+    maintenance_max_batch: int = 0              # 0 = uncapped; a ceiling on checks per run
     content_dir: Path = ROOT / "content"
     sources_path: Path = ROOT / "config" / "sources.json"
 
@@ -72,7 +74,7 @@ def load_settings() -> Settings:
         blob_backend=_env("BLOB_BACKEND", "local"),
         s3_bucket=_env("S3_BUCKET", ""),
         llm_backend=_env("LLM_BACKEND", "mock"),
-        bedrock_model_id=_env("BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0"),
+        bedrock_model_id=_env("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-5-5"),
         aws_region=_env("AWS_REGION", "us-west-2"),
         website_backend=_env("WEBSITE_BACKEND", "sample"),
         website_samples_path=Path(_env("WEBSITE_SAMPLES_PATH", str(ROOT / "data" / "generated" / "websites.json"))),
@@ -85,5 +87,7 @@ def load_settings() -> Settings:
         import_interval_minutes=int(_env("IMPORT_INTERVAL_MINUTES", "1440")),
         maintenance_interval_minutes=int(_env("MAINTENANCE_INTERVAL_MINUTES", "1440")),
         maintenance_recheck_days=int(_env("MAINTENANCE_RECHECK_DAYS", "30")),
+        maintenance_safety_factor=float(_env("MAINTENANCE_SAFETY_FACTOR", "1.2")),
+        maintenance_max_batch=int(_env("MAINTENANCE_MAX_BATCH", "0")),
         sources_path=Path(_env("SOURCES_CONFIG", str(ROOT / "config" / "sources.json"))),
     )

@@ -41,4 +41,4 @@ terraform apply -var image_tag=v1
 - Backups: Aurora automated backups (7 days) and S3 versioning.
 
 ## 5. Cost notes
-No NAT gateway, one Fargate task, Aurora at 0.5 ACU minimum, scheduled jobs as short Fargate tasks, in-process search. The largest variable costs are Bedrock tokens (bounded by page-hash skipping and the `maintenance_batch` limit), the ALB and Aurora. Enable OpenSearch only when in-process search stops being enough.
+No NAT gateway, one Fargate task, Aurora at 0.5 ACU minimum, scheduled jobs as short Fargate tasks, in-process search. The largest variable costs are Bedrock tokens (bounded by page-hash skipping and the self-sized maintenance batch -- `MAINTENANCE_RECHECK_DAYS` / `MAINTENANCE_SAFETY_FACTOR`, with an optional `MAINTENANCE_MAX_BATCH` ceiling; see ADR-11), the ALB and Aurora. Enable OpenSearch only when in-process search stops being enough.
