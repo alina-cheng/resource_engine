@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "organization.json",
+  "title": "organization",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "description"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string"
+    },
+    "alternate_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "email": {
+      "type": "string"
+    },
+    "website": {
+      "type": "string"
+    },
+    "tax_status": {
+      "type": "string"
+    },
+    "tax_id": {
+      "type": "string"
+    },
+    "year_incorporated": {
+      "type": "integer"
+    },
+    "legal_status": {
+      "type": "string"
+    },
+    "logo": {
+      "type": "string"
+    },
+    "uri": {
+      "type": "string"
+    },
+    "phones": {
+      "type": "array",
+      "items": {
+        "$ref": "phone.json"
+      }
+    },
+    "urls": {
+      "type": "array",
+      "items": {
+        "$ref": "url.json"
+      }
+    },
+    "attributes": {
+      "type": "array",
+      "items": {
+        "$ref": "attribute.json"
+      }
+    }
+  }
+}

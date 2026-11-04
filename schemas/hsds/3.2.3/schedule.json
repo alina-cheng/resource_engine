@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schedule.json",
+  "title": "schedule",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "service_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "location_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "service_at_location_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "valid_from": {
+      "type": "string"
+    },
+    "valid_to": {
+      "type": "string"
+    },
+    "dtstart": {
+      "type": "string"
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "until": {
+      "type": "string"
+    },
+    "count": {
+      "type": "integer"
+    },
+    "wkst": {
+      "type": "string"
+    },
+    "freq": {
+      "enum": [
+        "WEEKLY",
+        "MONTHLY"
+      ]
+    },
+    "interval": {
+      "type": "integer"
+    },
+    "byday": {
+      "type": "string"
+    },
+    "byweekno": {
+      "type": "string"
+    },
+    "bymonthday": {
+      "type": "string"
+    },
+    "byyearday": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "opens_at": {
+      "type": "string"
+    },
+    "closes_at": {
+      "type": "string"
+    },
+    "schedule_link": {
+      "type": "string"
+    },
+    "attending_type": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

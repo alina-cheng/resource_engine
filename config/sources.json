@@ -1,0 +1,6 @@
+[
+  {"name": "odrs", "adapter": "odrs", "location": "data/generated/odrs/*.json", "enabled": true,
+   "options": {"bearer_env": "ODRS_TOKEN"}},
+  {"name": "ndp", "adapter": "ndp", "location": "data/generated/ndp/*.json", "enabled": true,
+   "options": {"bearer_env": "NDP_TOKEN", "take": 100}}
+]

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metadata.json",
+  "title": "metadata",
+  "type": "object",
+  "required": [
+    "id",
+    "last_action_date",
+    "last_action_type",
+    "field_name",
+    "previous_value",
+    "replacement_value",
+    "updated_by"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "resource_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "last_action_date": {
+      "type": "string"
+    },
+    "last_action_type": {
+      "type": "string"
+    },
+    "field_name": {
+      "type": "string"
+    },
+    "previous_value": {
+      "type": "string"
+    },
+    "replacement_value": {
+      "type": "string"
+    },
+    "updated_by": {
+      "type": "string"
+    }
+  }
+}

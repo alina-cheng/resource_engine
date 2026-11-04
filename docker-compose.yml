@@ -1,0 +1,36 @@
+# docker compose up --build                 -> app on http://localhost:8000 (SQLite, mock LLM, sample websites)
+# docker compose --profile pg up --build    -> same app on PostgreSQL 16 (closest to Aurora)
+services:
+  app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      DATA_DIR: /data
+      JWT_SECRET: local-dev-secret-change-me
+      WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
+    volumes: ["appdata:/data", "./data/generated:/srv/data/generated"]
+    command: >
+      sh -c "python -m app.demo --no-serve && gunicorn app.main:app --bind 0.0.0.0:8000 --workers 1 --threads 4"
+  app-pg:
+    profiles: ["pg"]
+    build: .
+    ports: ["8001:8000"]
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      DB_HOST: db
+      DB_NAME: resource_engine
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DATA_DIR: /data
+      JWT_SECRET: local-dev-secret-change-me
+      WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
+    volumes: ["pgappdata:/data", "./data/generated:/srv/data/generated"]
+    command: >
+      sh -c "python -m app.demo --no-serve && gunicorn app.main:app --bind 0.0.0.0:8000 --workers 1 --threads 4"
+  db:
+    profiles: ["pg"]
+    image: postgres:16
+    environment: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: resource_engine }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 10 }
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+volumes: { appdata: {}, pgappdata: {}, pgdata: {} }

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "service_area.json",
+  "title": "service_area",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "service_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "service_at_location_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "extent": {
+      "type": "string"
+    },
+    "extent_type": {
+      "type": "string"
+    },
+    "uri": {
+      "type": "string"
+    }
+  }
+}

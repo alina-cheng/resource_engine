@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "location.json",
+  "title": "location",
+  "type": "object",
+  "required": [
+    "id",
+    "location_type"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "location_type": {
+      "enum": [
+        "physical",
+        "postal",
+        "virtual"
+      ]
+    },
+    "url": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "alternate_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "transportation": {
+      "type": "string"
+    },
+    "latitude": {
+      "type": "number"
+    },
+    "longitude": {
+      "type": "number"
+    },
+    "external_identifier": {
+      "type": "string"
+    },
+    "external_identifier_type": {
+      "type": "string"
+    },
+    "addresses": {
+      "type": "array",
+      "items": {
+        "$ref": "address.json"
+      }
+    },
+    "phones": {
+      "type": "array",
+      "items": {
+        "$ref": "phone.json"
+      }
+    },
+    "accessibility": {
+      "type": "array",
+      "items": {
+        "$ref": "accessibility.json"
+      }
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "$ref": "language.json"
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "$ref": "schedule.json"
+      }
+    }
+  }
+}

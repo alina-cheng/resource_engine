@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "attribute.json",
+  "title": "attribute",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "link_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "taxonomy_term_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "link_type": {
+      "type": "string"
+    },
+    "link_entity": {
+      "type": "string"
+    },
+    "value": {
+      "type": "string"
+    }
+  }
+}

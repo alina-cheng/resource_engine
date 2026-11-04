@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "taxonomy_term.json",
+  "title": "taxonomy_term",
+  "type": "object",
+  "required": [
+    "id",
+    "name"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "code": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "parent_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "taxonomy": {
+      "type": "string"
+    },
+    "taxonomy_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "language": {
+      "type": "string"
+    },
+    "term_uri": {
+      "type": "string"
+    }
+  }
+}

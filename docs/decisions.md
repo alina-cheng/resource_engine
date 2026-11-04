@@ -1,0 +1,9 @@
+# Decisions and trade-offs
+**ADR-1 Flask, not FastAPI.** The build environment could not install FastAPI, SQLAlchemy or pytest, so Flask and stdlib SQLite were used to keep everything testable. One Degree prefers FastAPI; routes are thin and the logic is framework-free, so porting is mechanical.
+**ADR-2 HSDS as documents inside a relational database.** HSDS is relational on paper but exchanged as nested JSON. Documents keep HSDS version changes cheap (no table migrations); relational tables handle workflow, joins and integrity. DynamoDB was considered and deferred: the data has many-to-many links (a phone can belong to a service, organization and location), flexible filters, and approvals needing transactions. A DynamoDB read model can be generated from the database later if API read volume demands it.
+**ADR-3 In-process search by default.** Cheaper and simpler than a cluster at this scale; behind an interface so OpenSearch can replace it. Semantic (embedding) search is not implemented; query expansion approximates it.
+**ADR-4 Facts, not wording.** The maintenance worker compares phones, counties, languages, hours and eligibility facts. An extra phone number on an organization's page is ignored unless none of the record's numbers appear.
+**ADR-5 Reconcile by field with a source snapshot.** Enough to tell a source update from a human or AI change (R4.2) and to surface clashes (R4.3) without a global rule.
+**ADR-6 Jobs as one-off Fargate tasks.** No always-on worker; the same image runs web and jobs.
+**ADR-7 No NAT gateway.** Saves a fixed monthly cost; tasks in public subnets are reachable only via the ALB security group. Move tasks to private subnets with NAT or VPC endpoints if policy requires.
+**ADR-8 Explicit consent before any request.** The chat never sends a request or shares personal data without a confirm action and a sharing setting.

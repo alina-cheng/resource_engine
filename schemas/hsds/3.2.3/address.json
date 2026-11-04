@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "address.json",
+  "title": "address",
+  "type": "object",
+  "required": [
+    "id",
+    "address_1",
+    "city",
+    "state_province",
+    "postal_code",
+    "country",
+    "address_type"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "location_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attention": {
+      "type": "string"
+    },
+    "address_1": {
+      "type": "string"
+    },
+    "address_2": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string"
+    },
+    "region": {
+      "type": "string"
+    },
+    "state_province": {
+      "type": "string"
+    },
+    "postal_code": {
+      "type": "string"
+    },
+    "country": {
+      "type": "string"
+    },
+    "address_type": {
+      "enum": [
+        "physical",
+        "postal",
+        "virtual"
+      ]
+    }
+  }
+}

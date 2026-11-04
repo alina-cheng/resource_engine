@@ -1,0 +1,9 @@
+var/
+data/generated/
+__pycache__/
+*.pyc
+.env
+.terraform/
+*.tfstate*
+*.tfplan
+.pytest_cache/

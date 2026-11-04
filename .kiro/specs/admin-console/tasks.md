@@ -1,0 +1,6 @@
+# Tasks: Admin console
+
+- [x] Overview, review, records, providers, seekers, imports, documents, keys
+- [x] Keyboard focus, labels, reduced motion, dark mode
+- [ ] Bulk approve by category
+- [ ] Screen-reader audit

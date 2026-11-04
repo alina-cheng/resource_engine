@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "service.json",
+  "title": "service",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "organization_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "program_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string"
+    },
+    "alternate_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "inactive",
+        "defunct",
+        "temporarily closed"
+      ]
+    },
+    "interpretation_services": {
+      "type": "string"
+    },
+    "application_process": {
+      "type": "string"
+    },
+    "fees_description": {
+      "type": "string"
+    },
+    "wait_time": {
+      "type": "string"
+    },
+    "accreditations": {
+      "type": "string"
+    },
+    "licenses": {
+      "type": "string"
+    },
+    "minimum_age": {
+      "type": "number"
+    },
+    "maximum_age": {
+      "type": "number"
+    },
+    "eligibility_description": {
+      "type": "string"
+    },
+    "assured_date": {
+      "type": "string"
+    },
+    "assurer_email": {
+      "type": "string"
+    },
+    "last_modified": {
+      "type": "string"
+    },
+    "phones": {
+      "type": "array",
+      "items": {
+        "$ref": "phone.json"
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "$ref": "schedule.json"
+      }
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "$ref": "language.json"
+      }
+    },
+    "service_areas": {
+      "type": "array",
+      "items": {
+        "$ref": "service_area.json"
+      }
+    },
+    "required_documents": {
+      "type": "array",
+      "items": {
+        "$ref": "required_document.json"
+      }
+    },
+    "cost_options": {
+      "type": "array",
+      "items": {
+        "$ref": "cost_option.json"
+      }
+    },
+    "attributes": {
+      "type": "array",
+      "items": {
+        "$ref": "attribute.json"
+      }
+    },
+    "urls": {
+      "type": "array",
+      "items": {
+        "$ref": "url.json"
+      }
+    }
+  }
+}
