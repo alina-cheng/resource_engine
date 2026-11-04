@@ -1,6 +1,6 @@
 [
   {"name": "odrs", "adapter": "odrs", "location": "https://rbg.1degree.org:3002/v1/opportunities", "enabled": true,
-   "options": {"api_key_env": "ODRS_API_KEY", "per_page": 100, "max_pages": 10,
+   "options": {"api_key_env": "ODRS_API_KEY", "per_page": 25, "max_pages": 1,
                "organizations_url": "https://rbg.1degree.org:3002/v1/organizations"}},
   {"name": "ndp", "adapter": "ndp", "location": "data/samples/national-data-platform-sample-*.json", "enabled": true,
    "options": {}}

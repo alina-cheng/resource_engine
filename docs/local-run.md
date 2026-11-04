@@ -16,7 +16,7 @@ Real imports use `config/sources.json`: ODRS comes from the live API and NDP fro
 python -m app.jobs.run seed-demo --no-maintenance   # imports real data if the database is empty, adds demo logins
 make run                                            # http://127.0.0.1:8000
 ```
-The admin and help seeker demo accounts work on real data. Provider accounts are not created, because they belong to the fake organizations. `max_pages` in `sources.json` limits ODRS to about 1,000 records; remove it to pull all of them (about 24,000).
+The admin and help seeker demo accounts work on real data. Provider accounts are not created, because they belong to the fake organizations. For a quick demo, `sources.json` limits ODRS to one page of 25 records. Raise `per_page` and `max_pages` to load more, or remove `max_pages` to pull all of them (about 24,000).
 
 Leave out `--no-maintenance` only if `WEBSITE_BACKEND=live` is set: by default the AI check reads fake websites and reports false problems on real records.
 
