@@ -7,6 +7,7 @@ services:
     environment:
       DATA_DIR: /data
       JWT_SECRET: local-dev-secret-change-me
+      SOURCES_CONFIG: /srv/config/sources.demo.json
       WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
     volumes: ["appdata:/data"]
     command: >
@@ -23,6 +24,7 @@ services:
       DB_PASSWORD: postgres
       DATA_DIR: /data
       JWT_SECRET: local-dev-secret-change-me
+      SOURCES_CONFIG: /srv/config/sources.demo.json
       WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
     volumes: ["pgappdata:/data"]
     command: >

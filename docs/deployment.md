@@ -27,8 +27,9 @@ The bootstrap deployment policy is a sandbox starting point covering this stack,
 
 - Confirm Aurora PostgreSQL engine/version availability, Fargate capacity, and an accessible Bedrock model/inference profile in us-west-2. `bedrock_model_id` deliberately has no default; task planning rejects Bedrock without a configured model.
 - Copy infra/terraform/workshop.tfvars.example to workshop.tfvars (ignored), fill the actual model and supplied HTTPS mocked/live ODRS/NDP URLs. Those endpoints use the existing adapters and preserve raw responses.
-- Optional bearer tokens stay in existing Secrets Manager secrets. Pass only ARN mappings in source_token_secret_arns; their values never enter Terraform variables/state. ECS execution-role access is extended to those ARNs.
+- Source credentials stay in existing Secrets Manager secrets. Map `ODRS_API_KEY` for the configured ODRS API, or the configured bearer environment name for a bearer-authenticated feed, through `source_token_secret_arns`; values never enter Terraform variables/state. ECS execution-role access is extended to those ARNs.
 - Outside local mode source globs are disabled unless explicitly allowed for synthetic demonstrations. Do not describe generated samples or mocked APIs as a live One Degree feed.
+- The repository now defaults to the configured ODRS HTTPS API (one page of 25) and local NDP sample files. The NDP file glob still requires a hosted HTTPS feed or an explicit synthetic-demo override on AWS. `config/sources.demo.json` selects generated files for local demos. JSON upload is available in the admin Imports page; it uses the same schema/quarantine pipeline.
 - `schedules_enabled` defaults false; enable only after source/model validation. `workshop_mode=true` permits RDS teardown without a final snapshot/deletion protection; durable production defaults retain protection.
 - Set certificate_arn for ACM HTTPS before sending login credentials through the public load balancer. Domain/certificate ownership and DNS are not created automatically.
 

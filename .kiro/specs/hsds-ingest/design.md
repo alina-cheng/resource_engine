@@ -7,5 +7,7 @@
 - `app/hsds/validator.py`: mandatory jsonschema with official HSDS 3.2.3 files and the original transform's required-parent/data-quality rules. No handwritten fallback.
 - Per-object quarantine supersedes whole-source quarantine for field/object validation failures (user-approved 2026-11-04). The accepted dependency graph is still one write transaction. Unmappable records and failed writes are held as whole records; partial records and held objects have distinct counters and UI labels.
 - Schedules carry IANA/local-time context under `x_resource_engine.local_schedule`; `schedule.timezone` must never contain an IANA string. Compatibility migrations preserve preexisting public IDs and append audit history; re-import reuses source-native org/service/location identities.
+- Ad-hoc file import: `POST /api/admin/imports/upload` (admin only) writes the uploaded JSON to a temp file, builds a `SourceConfig` for the chosen source with that path as `location`, and calls the same `ingest.run`; no adapter changes needed since `base.fetch` already reads a file glob.
+- `data/samples/national-data-platform-quarantine-demo.json`: demo source exercising valid records, whole-record quarantine and object-level quarantine; accepted graphs and held objects are counted separately.
 
 See `docs/detailed-design.md` for diagrams and `docs/technical-spec.md` for algorithms.

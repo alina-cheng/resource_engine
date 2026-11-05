@@ -17,11 +17,13 @@ def main(argv=None) -> int:
     ap.add_argument("--service-id")
     ap.add_argument("--who", default="scheduler")
     ap.add_argument("--job-id")
+    ap.add_argument("--no-maintenance", action="store_true", help="seed-demo: skip the AI website check")
     a = ap.parse_args(argv)
     c = build_container()
     if a.job == "seed-demo":
         from tools.sample_data_generator.seed import seed_demo
-        print(json.dumps(seed_demo(c, maintenance_limit=a.limit), indent=2, default=str))
+        print(json.dumps(seed_demo(c, run_maintenance=not a.no_maintenance, maintenance_limit=a.limit),
+                         indent=2, default=str))
         return 0
     from app.jobs.runner import JobRunner
     runner = JobRunner(c)

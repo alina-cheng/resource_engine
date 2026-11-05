@@ -1,6 +1,6 @@
 """Seeding a deployed environment must not leak keys, start unbounded model runs or leave unusable logins."""
 from dataclasses import replace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -96,3 +96,11 @@ def test_local_seed_still_creates_keys_and_runs_mock_maintenance(container):
     out = seed_mod.seed_demo(container)
     assert len(out["api_keys"]) == 2
     assert "skipped" not in out["maintenance"]
+
+
+def test_cli_no_maintenance_overrides_an_explicit_limit(container):
+    from app.jobs.run import main
+    c = real_model(container, env="local")
+    with patch("app.jobs.run.build_container", return_value=c):
+        assert main(["seed-demo", "--no-maintenance", "--limit", "1"]) == 0
+    c.maintenance.run.assert_not_called()

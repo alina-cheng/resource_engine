@@ -479,6 +479,51 @@ def admin_imports():
     return jsonify({"runs": runs, "sources": [{"name": s.name, "adapter": s.adapter, "location": s.location, "enabled": s.enabled} for s in c.sources()]})
 
 
+@bp.post("/admin/imports/upload")
+@auth_required("admin")
+def admin_import_upload():
+    """Import an uploaded source file through the normal ingest pipeline instead of the configured
+    location. The uploaded JSON is written to a temporary file and fed to the matching adapter, so
+    mapping, validation, raw-payload storage and quarantine behave exactly like a scheduled import."""
+    import os
+    import tempfile
+
+    from app.adapters.base import SourceConfig
+    from app.adapters.registry import ADAPTERS
+
+    c = container()
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return err(400, "Choose a JSON file to upload.")
+    # Reuse an existing source's name/adapter so ids, x_resource_engine.source and clash handling
+    # match previously imported records. Defaults to the NDP adapter.
+    source = (request.form.get("source") or "ndp").strip()
+    cfg = next((s for s in c.sources() if s.name == source), None)
+    adapter_kind = cfg.adapter if cfg else source
+    if adapter_kind not in ADAPTERS:
+        return err(400, f"No adapter is registered for '{adapter_kind}'.")
+
+    data = f.read()
+    try:
+        json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        return err(400, "That file is not valid JSON.")
+
+    tmp = tempfile.NamedTemporaryFile(prefix=f"upload-{source}-", suffix=".json", delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        upload_cfg = SourceConfig(name=source, adapter=adapter_kind, location=tmp.name, enabled=True,
+                                  options=(cfg.options if cfg else {}))
+        result = c.ingest.run(upload_cfg, trigger="upload", initiated_by=g.principal.email)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    return jsonify({**result, "filename": f.filename}), 201
+
+
 @bp.get("/admin/quarantine")
 @auth_required("admin")
 def admin_quarantine():

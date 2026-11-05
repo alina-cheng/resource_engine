@@ -17,3 +17,6 @@ __pycache__/
 crash.log
 local_refs/
 onedegree_resource_engine/
+
+# API check run artifact (regenerated)
+reports/api_check_results.json

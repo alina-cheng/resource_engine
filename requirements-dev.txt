@@ -99,6 +99,8 @@ python-dateutil==2.9.0.post0
     #   arrow
     #   botocore
     #   opensearch-py
+python-dotenv==1.2.4
+    # via onedegree-resource-engine
 referencing==0.37.0
     # via
     #   jsonschema

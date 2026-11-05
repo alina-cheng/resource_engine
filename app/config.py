@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -61,6 +63,7 @@ def _database_url(data_dir: Path) -> str:
 
 
 def load_settings() -> Settings:
+    load_dotenv(ROOT / ".env")  # local convenience; variables already set take priority
     data_dir = Path(_env("DATA_DIR", str(ROOT / "var")))
     if _env("APP_ENV", "local") != "local" and len(os.environ.get("JWT_SECRET", "")) < 32:
         raise ValueError("Set a unique JWT_SECRET of at least 32 characters outside local mode")

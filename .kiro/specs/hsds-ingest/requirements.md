@@ -15,3 +15,4 @@ As a platform engineer, I add a source and get valid HSDS records, with nothing 
 7. WHEN a new source is added THE SYSTEM SHALL require only an adapter module and a configuration entry.
 8. THE SYSTEM SHALL write the accepted graph, its conflicts/history and held-object evidence in one transaction; any write failure SHALL roll back that accepted graph and quarantine the source record.
 9. THE SYSTEM SHALL expose separate source-record and mapped-object counts. `received = stored + quarantined` counts source records; partially accepted records count as stored and also as `partial_records`. For mapped objects, `objects_received = objects_stored + objects_quarantined`. The UI SHALL identify partial imports explicitly.
+10. WHEN an admin uploads a JSON file for an existing source THE SYSTEM SHALL run it through the same fetch, map, validate and upsert-or-quarantine pipeline as a configured import, reusing that source's adapter, and SHALL report the same balanced counts.

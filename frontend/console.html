@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Resource Engine — API Console</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a222c;--panel2:#212c38;--border:#2d3a48;--text:#e6edf3;--muted:#9aa7b4;--accent:#4aa8ff;--ok:#3fb950;--bad:#f85149;--warn:#d29922}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:12px 18px;border-bottom:1px solid var(--border);background:var(--panel);display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0}
+  header .sub{color:var(--muted);font-size:12px}
+  header a{color:var(--accent);font-size:12px;margin-left:auto}
+  .wrap{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 52px)}
+  .left{border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .creds{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+  label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  input,select,textarea{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit}
+  textarea{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+  .row{display:flex;gap:8px}
+  .btn{background:var(--accent);color:#06121f;border:0;border-radius:6px;padding:8px 10px;font-weight:600;cursor:pointer;font-size:13px}
+  .btn.sec{background:var(--panel2);color:var(--text);border:1px solid var(--border);font-weight:500}
+  .btn:hover{filter:brightness(1.08)}
+  .list{overflow-y:auto;flex:1;min-height:0}
+  .grp{padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);position:sticky;top:0;background:var(--panel)}
+  .ep{padding:7px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;gap:8px;align-items:center}
+  .ep:hover{background:var(--panel)}
+  .ep.active{background:var(--panel2);border-left:3px solid var(--accent);padding-left:9px}
+  .m{font-size:10px;font-weight:700;border-radius:4px;padding:1px 5px;min-width:44px;text-align:center}
+  .m.GET{background:#15324a;color:#6ea8fe}.m.POST{background:#163a22;color:#7ee787}.m.PUT{background:#3a3016;color:#e3b341}.m.DELETE{background:#3a1a1a;color:#ff7b72}
+  .ep .p{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
+  .ep .auth{margin-left:auto;font-size:10px;color:var(--muted);white-space:nowrap}
+  .right{display:flex;flex-direction:column;min-height:0;padding:14px 16px;overflow:hidden}
+  .params{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .reqline{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;word-break:break-all}
+  .status{font-weight:600;margin:10px 0 6px}
+  .status.ok{color:var(--ok)}.status.err{color:var(--bad)}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px;overflow:auto;font-size:12px;margin:0;flex:1;min-height:0}
+  .hint{color:var(--muted);font-size:12px}
+  .pill{font-size:11px;border:1px solid var(--border);border-radius:999px;padding:2px 8px;color:var(--muted)}
+  .pill.on{color:var(--ok);border-color:#2e5a34}
+</style>
+</head>
+<body>
+<header>
+  <h1>Resource Engine — API Console</h1>
+  <span class="sub">pick an endpoint, set credentials, Execute</span>
+  <a href="/">← back to the app</a>
+</header>
+
+<div class="wrap">
+  <div class="left">
+    <div class="creds">
+      <div class="row" style="align-items:center">
+        <span class="pill" id="loginState">not logged in</span>
+        <span class="pill" id="keyState">no API key</span>
+      </div>
+      <label>Login (for /api routes)</label>
+      <div class="row">
+        <input id="email" placeholder="admin@demo.org" value="admin@demo.org" />
+        <input id="password" type="password" placeholder="password" value="demo-admin-1" style="max-width:150px" />
+      </div>
+      <div class="row">
+        <button class="btn" id="loginBtn">Log in</button>
+        <button class="btn sec" id="useStored">Use app session</button>
+      </div>
+      <label>API key (for /hsds routes)</label>
+      <div class="row">
+        <input id="apikey" placeholder="re_… (create one via POST /api/admin/api-keys)" />
+        <button class="btn sec" id="mintKey" title="Log in as admin first">Mint</button>
+      </div>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+
+  <div class="right">
+    <div class="params" id="params"></div>
+    <div class="row">
+      <button class="btn" id="exec">Execute</button>
+      <span class="hint" id="authNote"></span>
+    </div>
+    <div class="reqline" id="reqline">—</div>
+    <div class="status" id="status">Pick an endpoint on the left.</div>
+    <pre id="out"></pre>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const S={login:localStorage.getItem("re_token")||"",key:""};
+
+// Endpoint catalogue. auth: 'key' (hsds), 'admin'|'provider'|'seeker'|'any' (login), 'none'.
+const EP=[
+ ["Public",[
+  ["GET","/api/health","none"],
+  ["POST","/api/auth/login","none",{body:{email:"ana@demo.org",password:"demo-seeker-1"}}],
+  ["POST","/api/auth/register","none",{body:{email:"new.user@demo.org",name:"New User",password:"a-password-1"}}],
+  ["POST","/api/chat","none",{body:{message:"I need rental assistance"}}],
+  ["GET","/api/chat/history","none",{query:{session_id:""}}],
+  ["GET","/api/auth/me","any"],
+ ]],
+ ["User reports",[
+  ["POST","/api/reports","any",{body:{resource_id:"",reason:"Hours look wrong"}}],
+  ["GET","/api/admin/reports","admin",{query:{status:"open"}}],
+  ["POST","/api/admin/reports/{report_id}/resolve","admin",{path:{report_id:""}}],
+ ]],
+ ["Seeker",[
+  ["GET","/api/seeker/profile","seeker"],
+  ["PUT","/api/seeker/profile","seeker",{body:{zip:"94110",share_with_providers:true}}],
+  ["GET","/api/seeker/requests","seeker"],
+  ["GET","/api/search","any",{query:{q:"food"}}],
+  ["POST","/api/chat/resume","seeker",{body:{session_id:""}}],
+  ["POST","/api/chat/confirm","seeker",{body:{session_id:"",service_id:""}}],
+ ]],
+ ["Provider",[
+  ["GET","/api/provider/organization","provider"],
+  ["GET","/api/provider/records/{rid}","provider",{path:{rid:""}}],
+  ["GET","/api/provider/change-requests","provider"],
+  ["POST","/api/provider/change-requests","provider",{body:{resource_id:"",patch:{description:"Updated description"}}}],
+  ["GET","/api/provider/needs","provider"],
+  ["GET","/api/provider/served","provider"],
+  ["POST","/api/provider/requests/{rid}/respond","provider",{path:{rid:""},body:{action:"accept"}}],
+  ["GET","/api/provider/documents","provider"],
+ ]],
+ ["Admin",[
+  ["GET","/api/admin/stats","admin"],
+  ["GET","/api/admin/seekers","admin"],
+  ["GET","/api/admin/seekers/{uid}","admin",{path:{uid:""}}],
+  ["GET","/api/admin/providers","admin",{query:{page:"1",per_page:"10",q:""}}],
+  ["GET","/api/admin/providers/{org_id}","admin",{path:{org_id:""}}],
+  ["GET","/api/admin/records/{rid}","admin",{path:{rid:""}}],
+  ["PUT","/api/admin/records/{rid}","admin",{path:{rid:""},body:{patch:{description:"Admin edit"},note:"why"}}],
+  ["GET","/api/admin/change-requests","admin",{query:{status:"pending"}}],
+  ["POST","/api/admin/change-requests/{cid}/approve","admin",{path:{cid:""},body:{note:"ok"}}],
+  ["POST","/api/admin/change-requests/{cid}/reject","admin",{path:{cid:""},body:{note:"no"}}],
+  ["POST","/api/admin/maintenance/run","admin",{body:{service_id:"",wait:true,force:true}}],
+  ["GET","/api/admin/maintenance/results","admin",{query:{category:"",per_page:"10",q:"",source:""}}],
+  ["GET","/api/admin/maintenance/runs","admin"],
+  ["POST","/api/admin/imports/run","admin",{body:{wait:true}}],
+  ["GET","/api/admin/imports","admin"],
+  ["GET","/api/admin/quarantine","admin"],
+  ["GET","/api/admin/api-keys","admin"],
+  ["POST","/api/admin/api-keys","admin",{body:{name:"console-key",source_scope:""}}],
+  ["DELETE","/api/admin/api-keys/{kid}","admin",{path:{kid:""}}],
+  ["GET","/api/admin/users","admin"],
+  ["POST","/api/admin/users","admin",{body:{email:"p@demo.org",name:"Prov",role:"provider",org_id:"",password:"a-password-1"}}],
+  ["GET","/api/admin/documents","admin",{query:{status:""}}],
+  ["POST","/api/admin/documents/{did}/decide","admin",{path:{did:""},body:{approve:true}}],
+  ["POST","/api/admin/reindex","admin"],
+ ]],
+ ["HSDS API (needs re_ key)",[
+  ["GET","/hsds/","key"],
+  ["GET","/hsds/services","key",{query:{page:"1",per_page:"5",search:"",status:"",organization_id:"",taxonomy_term_id:"",minimal:"",extensions:""}}],
+  ["GET","/hsds/services/{rid}","key",{path:{rid:""}}],
+  ["GET","/hsds/organizations","key",{query:{per_page:"5"}}],
+  ["GET","/hsds/organizations/{rid}","key",{path:{rid:""}}],
+  ["GET","/hsds/service_at_locations","key",{query:{per_page:"5"}}],
+  ["GET","/hsds/service_at_locations/{rid}","key",{path:{rid:""}}],
+  ["GET","/hsds/locations","key",{query:{per_page:"5"}}],
+  ["GET","/hsds/locations/{rid}","key",{path:{rid:""}}],
+  ["GET","/hsds/taxonomies","key",{query:{per_page:"5"}}],
+  ["GET","/hsds/taxonomy_terms","key",{query:{per_page:"5",taxonomy_id:""}}],
+  ["GET","/hsds/taxonomy_terms/{rid}","key",{path:{rid:""}}],
+ ]],
+];
+
+let cur=null;
+function renderList(){
+  const L=$("list"); L.innerHTML="";
+  for(const [grp,eps] of EP){
+    const h=document.createElement("div");h.className="grp";h.textContent=grp;L.appendChild(h);
+    eps.forEach((e,i)=>{
+      const [m,p,auth]=e;
+      const d=document.createElement("div");d.className="ep";d.dataset.grp=grp;d.dataset.idx=i;
+      d.innerHTML=`<span class="m ${m}">${m}</span><span class="p">${p}</span><span class="auth">${auth}</span>`;
+      d.onclick=()=>select(e,d);
+      L.appendChild(d);
+    });
+  }
+}
+function select(e,node){
+  document.querySelectorAll(".ep").forEach(x=>x.classList.remove("active"));
+  node.classList.add("active");
+  cur=e; const [m,p,auth,def={}]=e;
+  const P=$("params");P.innerHTML="";
+  const mk=(lbl,id,val)=>{const w=document.createElement("div");w.innerHTML=`<label>${lbl}</label>`;const inp=document.createElement("input");inp.id=id;inp.value=val??"";w.appendChild(inp);P.appendChild(w);};
+  for(const k in (def.path||{})) mk("path: "+k,"path_"+k,def.path[k]);
+  for(const k in (def.query||{})) mk("query: "+k,"query_"+k,def.query[k]);
+  if(def.body){const w=document.createElement("div");w.innerHTML=`<label>JSON body</label>`;const t=document.createElement("textarea");t.id="body";t.rows=6;t.value=JSON.stringify(def.body,null,2);w.appendChild(t);P.appendChild(w);}
+  $("authNote").textContent = auth==="key"?"uses the API key":auth==="none"?"no auth required":`needs a ${auth} login`;
+  buildReq();
+  ["input","textarea"].forEach(()=>{});
+  P.querySelectorAll("input,textarea").forEach(el=>el.addEventListener("input",buildReq));
+}
+function buildPath(){
+  const [m,p,auth,def={}]=cur; let path=p;
+  for(const k in (def.path||{})) path=path.replace("{"+k+"}", encodeURIComponent($("path_"+k)?.value||("{"+k+"}")));
+  const qs=new URLSearchParams();
+  for(const k in (def.query||{})){const v=$("query_"+k)?.value;if(v) qs.set(k,v);}
+  return path+(qs.toString()?"?"+qs:"");
+}
+function buildReq(){
+  if(!cur)return; const [m]=cur; const path=buildPath();
+  const auth=cur[2];
+  let h="";
+  if(auth==="key") h=S.key?`-H "Authorization: Bearer ${S.key.slice(0,10)}…"`:"(no API key set)";
+  else if(auth!=="none") h=S.login?`-H "Authorization: Bearer <login token>"`:"(not logged in)";
+  const body=$("body")?` -d '${$("body").value.replace(/\s+/g," ").slice(0,80)}…'`:"";
+  $("reqline").textContent=`curl -X ${m} ${h} ${location.origin}${path}${body}`;
+}
+async function exec(){
+  if(!cur)return; const [m,,auth,def={}]=cur; const path=buildPath();
+  const headers={}; let bodyStr=null;
+  if(auth==="key"){ if(!S.key){return fail("Set an API key first (Mint, or paste one).");} headers.Authorization="Bearer "+S.key; }
+  else if(auth!=="none"){ if(!S.login){return fail("Log in first for this route.");} headers.Authorization="Bearer "+S.login; }
+  if($("body") && m!=="GET"){ try{bodyStr=JSON.stringify(JSON.parse($("body").value));headers["Content-Type"]="application/json";}catch(e){return fail("Body is not valid JSON: "+e.message);} }
+  $("status").textContent="Sending…";$("status").className="status";
+  const t0=performance.now();
+  let r,txt,json;
+  try{ r=await fetch(path,{method:m,headers,body:bodyStr}); txt=await r.text(); try{json=JSON.parse(txt);}catch{json=txt;} }
+  catch(e){ return fail("Request failed: "+e); }
+  const ms=Math.round(performance.now()-t0);
+  $("status").textContent=`HTTP ${r.status} ${r.statusText} · ${ms} ms`;
+  $("status").className="status "+(r.ok?"ok":"err");
+  $("out").textContent=typeof json==="string"?json:JSON.stringify(json,null,2);
+  // convenience: capture tokens/keys/ids
+  if(json && typeof json==="object"){
+    if(json.token){S.login=json.token;localStorage.setItem("re_token",json.token);refreshState();}
+    if(json.key && String(json.key).startsWith("re_")){S.key=json.key;$("apikey").value=json.key;refreshState();}
+  }
+}
+function fail(msg){$("status").textContent=msg;$("status").className="status err";$("out").textContent="";}
+function refreshState(){
+  $("loginState").textContent=S.login?"logged in":"not logged in";$("loginState").className="pill"+(S.login?" on":"");
+  $("keyState").textContent=S.key?"API key set":"no API key";$("keyState").className="pill"+(S.key?" on":"");
+  buildReq();
+}
+async function doLogin(){
+  const r=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("email").value,password:$("password").value})});
+  const j=await r.json();
+  if(j.token){S.login=j.token;localStorage.setItem("re_token",j.token);refreshState();$("status").textContent="Logged in as "+($("email").value);$("status").className="status ok";}
+  else fail("Login failed: "+(j.error||r.status));
+}
+async function mintKey(){
+  if(!S.login){return fail("Log in as admin first, then Mint.");}
+  const r=await fetch("/api/admin/api-keys",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+S.login},body:JSON.stringify({name:"console-"+Date.now()})});
+  const j=await r.json();
+  if(j.key){S.key=j.key;$("apikey").value=j.key;refreshState();$("status").textContent="Minted an API key.";$("status").className="status ok";}
+  else fail("Could not mint a key (need an admin login): "+(j.error||r.status));
+}
+$("loginBtn").onclick=doLogin;
+$("useStored").onclick=()=>{S.login=localStorage.getItem("re_token")||"";refreshState();$("status").textContent=S.login?"Using the app's saved session.":"No saved session found — log in.";};
+$("mintKey").onclick=mintKey;
+$("apikey").addEventListener("input",e=>{S.key=e.target.value.trim();refreshState();});
+$("exec").onclick=exec;
+renderList();refreshState();
+</script>
+</body>
+</html>

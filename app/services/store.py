@@ -310,7 +310,9 @@ class HsdsStore:
             # keep system extension, refresh source info, drop resolved flags
             x = dict(ours.get("x_resource_engine") or {})
             src_x = theirs.get("x_resource_engine") or {}
-            x["source"] = src_x.get("source", x.get("source"))
+            source_info = src_x.get("source", x.get("source"))
+            if source_info is not None:     # link records and taxonomies have no source info
+                x["source"] = source_info
             flags = set(x.get("flags", [])) | set(src_x.get("flags", []))
             if not str(merged.get("description", "")).endswith("(description not available)"):
                 flags.discard("description_missing")

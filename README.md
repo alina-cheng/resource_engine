@@ -81,7 +81,7 @@ uv sync --frozen
 make demo
 ```
 
-Open **http://127.0.0.1:8000**. The demo imports synthetic data, seeds users, requests and documents, and runs mock maintenance. Existing databases are preserved. No AWS account or model key is needed.
+Open **http://127.0.0.1:8000**. The demo uses `config/sources.demo.json` and defaults to `var/demo`, imports synthetic data, seeds users, requests and documents, and runs mock maintenance. Existing databases are preserved. No AWS account or model key is needed.
 
 | Role | Email | Demo password |
 |---|---|---|
@@ -97,6 +97,10 @@ docker compose --profile pg up --build app-pg  # PostgreSQL 16: http://localhost
 ```
 
 See [Local run](docs/local-run.md) for a guided tour and additional accounts.
+
+For configured imports, `config/sources.json` uses the ODRS HTTPS API with `ODRS_API_KEY` and the two local NDP sample files. ODRS is capped at one page of 25 records by default. Use an authorized event/staging key; `.env` loads without overriding existing environment variables. Run `uv run --frozen python -m app.jobs.run import` to import without demo seeding. `seed-demo --no-maintenance` skips checks, and real-model seeding otherwise requires an explicit `--limit`.
+
+Admins can upload source-format JSON on the Imports page through the same validation/quarantine pipeline. The [API console](frontend/console.html) is served at `/console.html`; the [API report](reports/API_REPORT.md) documents the verification harness. JSON upload does not add spreadsheet ingestion.
 
 ## Deploy to AWS
 
@@ -143,8 +147,8 @@ ndp_api_url  = "https://your-ndp-feed.example/resources"
 # Issued ACM certificate for your domain; required before public login.
 # certificate_arn = "arn:aws:acm:us-west-2:ACCOUNT_ID:certificate/CERTIFICATE_ID"
 
-# Existing Secrets Manager ARNs, never bearer token values.
-# source_token_secret_arns = { ODRS_TOKEN = "arn:aws:secretsmanager:..." }
+# Existing Secrets Manager ARNs, never source credential values.
+# source_token_secret_arns = { ODRS_API_KEY = "arn:aws:secretsmanager:..." }
 ```
 
 Replace example endpoints and model placeholders before deployment. Confirm the database engine and model are available in the account. For a demo without model calls, set `llm_backend = "mock"` and `bedrock_model_id = ""`.
