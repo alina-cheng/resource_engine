@@ -32,3 +32,12 @@ def migrate(tx):
                 tx.run("UPDATE resource_source SET snapshot=? WHERE resource_id=? AND source=?",
                        (dumps(snapshot), row["resource_id"], row["source"]))
         tx.run("INSERT INTO schema_migration (version,applied_at) VALUES (?,?)", (2, now_iso()))
+    if 3 not in applied:
+        if tx.db.kind == "postgres":
+            columns = {r["column_name"] for r in tx.q(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='check_result'")}
+        else:
+            columns = {r["name"] for r in tx.q("PRAGMA table_info(check_result)")}
+        if "record_hash" not in columns:
+            tx.run("ALTER TABLE check_result ADD COLUMN record_hash TEXT")
+        tx.run("INSERT INTO schema_migration (version,applied_at) VALUES (?,?)", (3, now_iso()))

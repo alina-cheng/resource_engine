@@ -35,6 +35,9 @@ variable "import_schedule" { default = "cron(0 11 * * ? *)" }      # 04:00 Pacif
 variable "maintenance_schedule" { default = "cron(0 12 * * ? *)" } # after the import
 
 variable "schedules_enabled" { default = false }
+variable "maintenance_schedule_enabled" { default = false }
+variable "auto_maintenance_after_import" { default = false }
+variable "maintenance_concurrency" { default = 1 }
 variable "workshop_mode" { default = false }
 variable "odrs_api_url" { default = "" }
 variable "ndp_api_url" { default = "" }

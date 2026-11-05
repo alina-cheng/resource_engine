@@ -26,7 +26,7 @@ locals {
   }
 }
 resource "aws_scheduler_schedule" "job" {
-  for_each                     = var.schedules_enabled ? local.jobs : {}
+  for_each                     = { for name, job in local.jobs : name => job if var.schedules_enabled || (name == "maintenance" && var.maintenance_schedule_enabled) }
   name                         = "${local.name}-${each.key}"
   schedule_expression          = each.value.schedule
   schedule_expression_timezone = "UTC"

@@ -9,7 +9,7 @@ mention is never a discrepancy. The website is treated as more accurate than the
 the MVP, so the page value is the proposal.
 
 Every check ends with at least one finding, never a silent skip, and gets exactly one category
-by precedence: check_failed > actively_bad > discrepancy > missing_information > verified. A
+by precedence: actively_bad > check_failed > discrepancy > missing_information > verified. A
 check emits one finding per field that differs, plus one whole-record finding for a failure, a
 closure, or a verified result. Every finding passes ``finding_problems``.
 
@@ -41,8 +41,8 @@ def hsds_id(source: str, native_id: str) -> str:
 
 # Precedence for the one category of a check: earlier wins.
 PRECEDENCE = (
-    Category.CHECK_FAILED,
     Category.ACTIVELY_BAD,
+    Category.CHECK_FAILED,
     Category.DISCREPANCY,
     Category.MISSING_INFORMATION,
     Category.VERIFIED,
@@ -967,9 +967,9 @@ def compare(
     quotes = [q for q in dict.fromkeys(matched) if squash(q) in builder.page]
     confidence = CONFIDENCE_VERIFIED
     if not quotes:
-        confidence = CONFIDENCE_NOTHING_TO_COMPARE
-        first_line = next(line.strip() for line in page_text.split("\n") if line.strip())
-        quotes = [first_line[:200]]
+        return failure(record, Category.CHECK_FAILED,
+                       "The page did not supply comparable evidence; the record was not verified.",
+                       url=url, checked_at=checked_at)
     verified = _Draft(None, None, None, Category.VERIFIED, confidence, quotes)
     builder.add(verified, model=model_id, quoted_from_page=True)
     if not builder.findings:

@@ -19,8 +19,9 @@ class JobRunner:
             return {"results": c.ingest_all("manual", params.get("who", "admin"), params.get("source"))}
         if kind == "maintenance":
             return c.maintenance.run(scope=params.get("scope", "all"), service_id=params.get("service_id"),
-                trigger="manual", initiated_by=params.get("who", "admin"), limit=params.get("limit"),
-                force=bool(params.get("force")))
+                trigger="scheduled" if params.get("who") == "scheduler" else "manual",
+                initiated_by=params.get("who", "admin"), limit=params.get("limit"),
+                force=bool(params.get("force")), job_id=params.get("job_id"))
         if kind == "reindex":
             return c.search.reindex()
         raise ValueError(f"unknown job {kind}")
@@ -47,10 +48,17 @@ class JobRunner:
             raise JobError("Job was already claimed or does not exist.")
         row = self.get(jid)
         try:
-            out = self._do(row["kind"], row["params"])
+            out = self._do(row["kind"], row["params"] | {"job_id": jid})
             if any(r.get("status") == "failed" for r in out.get("results", [])):
                 self.c.db.run("UPDATE job_run SET result=? WHERE id=?", (dumps(out), jid))
                 raise JobError("One or more imports failed; inspect import runs.")
+            if row["kind"] == "import" and self.c.settings.auto_maintenance_after_import and any(
+                run.get("received", 0) for run in out.get("results", [])
+            ):
+                try:
+                    out["maintenance_job"] = self.enqueue_maintenance("import:" + str(row["params"].get("who", "admin")))
+                except JobError as error:
+                    out["maintenance_error"] = str(error)
         except Exception as error:
             self.c.db.run("UPDATE job_run SET status='failed',finished_at=?,error=? WHERE id=?",
                            (now_iso(), f"{type(error).__name__}: {error}"[:2000], jid))
@@ -58,6 +66,13 @@ class JobRunner:
         self.c.db.run("UPDATE job_run SET status='completed',finished_at=?,result=? WHERE id=?",
                        (now_iso(), dumps(out), jid))
         return {"started": True, "finished": True, "job_id": jid, **out}
+
+    def enqueue_maintenance(self, who):
+        # Reuse an ongoing corpus check instead of starting another import follow-up.
+        active = self.c.db.one("SELECT id FROM job_run WHERE kind='maintenance' AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1")
+        if active:
+            return {"job_id": active["id"], "started": False, "reused": True}
+        return self.start("maintenance", who=who, limit=self.c.maintenance.active_source_count())
 
     def _background(self, jid):
         try:

@@ -44,6 +44,8 @@ class Settings:
     maintenance_recheck_days: int = 30
     maintenance_safety_factor: float = 1.2
     maintenance_max_batch: int = 0
+    auto_maintenance_after_import: bool = False
+    maintenance_concurrency: int = 1
     content_dir: Path = ROOT / "content"
     sources_path: Path = ROOT / "config" / "sources.json"
 
@@ -96,5 +98,7 @@ def load_settings() -> Settings:
         maintenance_recheck_days=int(_env("MAINTENANCE_RECHECK_DAYS", "30")),
         maintenance_safety_factor=float(_env("MAINTENANCE_SAFETY_FACTOR", "1.2")),
         maintenance_max_batch=int(_env("MAINTENANCE_MAX_BATCH", "0")),
+        auto_maintenance_after_import=_env("AUTO_MAINTENANCE_AFTER_IMPORT", "false").lower() == "true",
+        maintenance_concurrency=int(_env("MAINTENANCE_CONCURRENCY", "1")),
         sources_path=Path(_env("SOURCES_CONFIG", str(ROOT / "config" / "sources.json"))),
     )

@@ -120,6 +120,8 @@ locals {
     { name = "MAINTENANCE_RECHECK_DAYS", value = tostring(var.maintenance_recheck_days) },
     { name = "MAINTENANCE_SAFETY_FACTOR", value = tostring(var.maintenance_safety_factor) },
     { name = "MAINTENANCE_MAX_BATCH", value = tostring(var.maintenance_max_batch) },
+    { name = "AUTO_MAINTENANCE_AFTER_IMPORT", value = tostring(var.auto_maintenance_after_import) },
+    { name = "MAINTENANCE_CONCURRENCY", value = tostring(var.maintenance_concurrency) },
     { name = "ODRS_API_URL", value = var.odrs_api_url },
     { name = "NDP_API_URL", value = var.ndp_api_url },
     { name = "SOURCES_CONFIG", value = var.sources_config },
