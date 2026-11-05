@@ -122,6 +122,8 @@ locals {
     { name = "MAINTENANCE_MAX_BATCH", value = tostring(var.maintenance_max_batch) },
     { name = "ODRS_API_URL", value = var.odrs_api_url },
     { name = "NDP_API_URL", value = var.ndp_api_url },
+    { name = "SOURCES_CONFIG", value = var.sources_config },
+    { name = "ALLOW_SAMPLE_SOURCES", value = tostring(var.allow_sample_sources) },
     { name = "SEARCH_BACKEND", value = var.enable_opensearch ? "opensearch" : "memory" },
     { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch ? "https://${aws_opensearch_domain.this[0].endpoint}" : "" },
     { name = "JOB_RUNNER", value = "ecs" },

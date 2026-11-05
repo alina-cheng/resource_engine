@@ -5,5 +5,8 @@ schedules_enabled = false
 bedrock_model_id   = "REPLACE_WITH_ACCOUNT_ENABLED_MODEL_OR_INFERENCE_PROFILE"
 odrs_api_url       = ""
 ndp_api_url        = ""
+# Synthetic demo only; applies to web and one-off jobs:
+# sources_config       = "/srv/config/sources.demo.json"
+# allow_sample_sources = true
 # Source tokens are existing Secrets Manager ARNs, never token values:
 # source_token_secret_arns = { ODRS_TOKEN = "arn:aws:secretsmanager:..." }
