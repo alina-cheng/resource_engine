@@ -25,7 +25,8 @@ class IngestService:
         links = {}
         for row in previous:
             data = json.loads(row["data"])
-            native = data.get("x_resource_engine", {}).get("source", {}).get("record_id")
+            # Rows updated by earlier versions can hold x_resource_engine.source = null.
+            native = ((data.get("x_resource_engine") or {}).get("source") or {}).get("record_id")
             if native is not None:
                 identities[(row["type"], str(native))] = row["id"]
             if row["type"] == "service_at_location":
