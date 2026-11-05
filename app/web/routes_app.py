@@ -133,8 +133,9 @@ def search_directory():
 @bp.post("/reports")
 @auth_required("seeker", "provider", "admin")
 def file_report():
-    """Any signed-in user can report a listing that looks wrong. One report forces a fresh AI
-    maintenance check of that record and raises the `user_reported` flag for a specialist."""
+    """Any signed-in user can report a listing that looks wrong. The report selects the record
+    for the next maintenance run and raises the `user_reported` flag for a specialist; the AI
+    re-reviews only if the page changed since the last review (it respects the hash-skip)."""
     c, b, p = container(), body(), g.principal
     rid = (b.get("resource_id") or "").strip()
     row = c.store.get(rid)

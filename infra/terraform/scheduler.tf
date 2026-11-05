@@ -21,7 +21,8 @@ resource "aws_iam_role_policy" "scheduler" {
 locals {
   jobs = {
     import      = { schedule = var.import_schedule, command = ["python", "-m", "app.jobs.run", "import", "--who=scheduler"] }
-    maintenance = { schedule = var.maintenance_schedule, command = ["python", "-m", "app.jobs.run", "maintenance", "--limit=${var.maintenance_batch}", "--who=scheduler"] }
+    # No --limit: the run self-sizes from the source count (MAINTENANCE_RECHECK_DAYS / factor / max).
+    maintenance = { schedule = var.maintenance_schedule, command = ["python", "-m", "app.jobs.run", "maintenance", "--who=scheduler"] }
   }
 }
 resource "aws_scheduler_schedule" "job" {

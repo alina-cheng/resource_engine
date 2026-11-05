@@ -8,13 +8,10 @@ import json
 import unittest
 
 from app.maintenance.comparator import (
-    Comparison,
     PRECEDENCE,
     categorize,
     check_page,
-    compare,
     rank_findings,
-    triage_tier,
 )
 from app.maintenance.findings import (
     Category,
@@ -22,7 +19,7 @@ from app.maintenance.findings import (
     Finding,
     finding_problems,
 )
-from app.maintenance.extractor import ModelReply, extract_facts, squash, visible_text
+from app.maintenance.extractor import ModelReply, extract_facts, visible_text
 from app.maintenance.website_source import WebsiteResult
 
 
@@ -151,31 +148,149 @@ if __name__ == "__main__":
 
 
 class UserReportTriggers(unittest.TestCase):
-    """A user report forces a fresh AI check and raises the single user_reported flag."""
+    """A user report selects the record and always raises the user_reported flag for a human,
+    but it still respects the hash-skip: the AI re-reviews only if the page changed."""
 
     @classmethod
     def setUpClass(cls):
         from tests.helpers import generated_container
         cls.c, cls.gen = generated_container(20, 10, 7)
+        # First full run establishes a page hash + category for every record.
         cls.c.maintenance.run(scope="all", force=True, trigger="test", initiated_by="test")
         cls.svc = cls.c.store.list("service", limit=1)[0][0]
 
-    def test_report_forces_recheck_and_raises_flag(self):
+    def test_report_on_unchanged_page_skips_ai_but_still_flags(self):
         c, svc = self.c, self.svc
         c.maintenance.reports.file(svc["id"], reporter_id="u1", reporter_email="u1@x.org", note="looks wrong")
-        # Not forced, not due by age -> would normally be skipped; the report makes it due.
+        # Page is unchanged since the first run -> AI is skipped, but the record is selected
+        # and flagged for a human because a person reported it.
         out = c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
         self.assertGreaterEqual(out["user_reported"], 1)
+        self.assertGreaterEqual(out["skipped_unchanged"], 1)  # the reported record hash-skipped
         row = c.db.one("SELECT flags FROM check_result WHERE resource_id=?", (svc["id"],))
         self.assertIn("user_reported", (row["flags"] or ""))
-        # The report is resolved once the record has been rechecked.
+        # The report is resolved once the record has been handled.
         self.assertFalse(c.maintenance.reports.has_open(svc["id"]))
 
-    def test_single_flag_regardless_of_outcome(self):
-        # Whatever the check concludes, exactly the one user_reported flag is raised.
+    def test_report_on_changed_page_runs_ai_and_flags(self):
         c = self.c
-        other = c.store.list("service", limit=2)[0][1]
+        other = c.store.list("service", limit=3)[0][2]
+        # Change the record so its hash differs -> the report-driven run re-reviews with the AI.
+        c.store.apply_patch(other["id"], {"eligibility_description": "Changed eligibility text for the test."},
+                            "admin", "tester")
         c.maintenance.reports.file(other["id"], reporter_id="u2", reporter_email="u2@x.org")
-        c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
+        out = c.maintenance.run(scope="all", force=False, trigger="test", initiated_by="test")
+        self.assertGreaterEqual(out["user_reported"], 1)
         flags = json.loads(c.db.one("SELECT flags FROM check_result WHERE resource_id=?", (other["id"],))["flags"] or "[]")
-        self.assertEqual(flags, ["user_reported"])
+        self.assertEqual(flags, ["user_reported"])  # exactly the one flag, whatever the AI concluded
+
+
+class SelfSizingBatch(unittest.TestCase):
+    """The scheduled daily batch is derived from the source count, not hard-coded, so every
+    source is reviewed within MAINTENANCE_RECHECK_DAYS and the number scales with the corpus."""
+
+    def _container(self, **overrides):
+        from tests.helpers import make_container
+        return make_container(**overrides)
+
+    def _add_services(self, c, n):
+        # Insert n minimal active service rows directly (no website needed for batch math).
+        from app.db import dumps, now_iso
+        for i in range(n):
+            sid = f"svc-{i:05d}"
+            c.db.run(
+                "INSERT INTO resource (id,type,org_id,source,status,data,version,created_at,updated_at,deleted) "
+                "VALUES (?,?,?,?,?,?,?,?,?,0)",
+                (sid, "service", None, "test", "active", dumps({"id": sid, "name": f"S{i}"}), 1, now_iso(), now_iso()))
+
+    def test_batch_scales_with_source_count(self):
+        c = self._container(maintenance_recheck_days=30, maintenance_safety_factor=1.2, maintenance_max_batch=0)
+        self._add_services(c, 900)
+        # 900 / 30 = 30, * 1.2 = 36
+        self.assertEqual(c.maintenance.active_source_count(), 900)
+        self.assertEqual(c.maintenance.daily_batch(), 36)
+        # Grow the corpus: the batch re-derives with no code/config change.
+        self._add_services_offset(c, 900, 900)  # add 900 more -> 1800 total
+        self.assertEqual(c.maintenance.daily_batch(), 72)  # 1800/30=60 *1.2=72
+
+    def _add_services_offset(self, c, start, n):
+        from app.db import dumps, now_iso
+        for i in range(start, start + n):
+            sid = f"svc-{i:05d}"
+            c.db.run(
+                "INSERT INTO resource (id,type,org_id,source,status,data,version,created_at,updated_at,deleted) "
+                "VALUES (?,?,?,?,?,?,?,?,?,0)",
+                (sid, "service", None, "test", "active", dumps({"id": sid, "name": f"S{i}"}), 1, now_iso(), now_iso()))
+
+    def test_max_batch_caps_the_computed_value(self):
+        c = self._container(maintenance_recheck_days=30, maintenance_safety_factor=1.2, maintenance_max_batch=50)
+        self._add_services(c, 9000)  # 9000/30=300 *1.2=360, capped to 50
+        self.assertEqual(c.maintenance.daily_batch(), 50)
+
+    def test_no_sources_is_zero_batch(self):
+        c = self._container()
+        self.assertEqual(c.maintenance.daily_batch(), 0)
+
+    def test_fifty_thousand_sources_hits_thirty_day_window(self):
+        c = self._container(maintenance_recheck_days=30, maintenance_safety_factor=1.0, maintenance_max_batch=0)
+        self._add_services(c, 50000)
+        batch = c.maintenance.daily_batch()  # ceil(50000/30) = 1667
+        self.assertEqual(batch, 1667)
+        # 30 days at this batch covers the whole corpus.
+        self.assertGreaterEqual(batch * 30, 50000)
+
+    def test_scheduled_run_self_sizes_without_explicit_limit(self):
+        c = self._container(maintenance_recheck_days=10, maintenance_safety_factor=1.0, maintenance_max_batch=0)
+        self._add_services(c, 100)  # 100/10 = 10 per run
+        out = c.maintenance.run(scope="all", trigger="test", initiated_by="test")  # no limit
+        self.assertEqual(out["batch_target"], 10)
+        self.assertEqual(out["checked"], 10)  # only the self-sized batch is checked
+
+    def test_explicit_limit_overrides_self_sizing(self):
+        c = self._container(maintenance_recheck_days=10, maintenance_safety_factor=1.0)
+        self._add_services(c, 100)
+        out = c.maintenance.run(scope="all", trigger="test", initiated_by="test", limit=5)
+        self.assertEqual(out["checked"], 5)
+
+
+class StructuredPatchTranslation(unittest.TestCase):
+    """The bridge translates engine findings into structured, schema-valid HSDS patches without
+    degrading the value (regression guard for the status closure signal)."""
+
+    def _svc(self, **data):
+        base = {"id": "svc-x", "name": "X", "status": "active"}
+        base.update(data)
+        return {"id": "svc-x", "type": "service", "org_id": None, "data": base}
+
+    def _finding(self, field, proposed, category=Category.DISCREPANCY):
+        return Finding(
+            id="f", service_id="svc-x", field=field, current_value="active", proposed_value=proposed,
+            category=category, confidence=0.7, model_id="m", checked_at="2026-11-04T00:00:00Z",
+            evidence=[Evidence(url="http://x.org", snippet="the org has permanently closed", model="m")],
+        )
+
+    def test_permanent_closure_keeps_defunct_not_inactive(self):
+        from app.services.maintenance_bridge import _structured_patch
+        svc = self._svc()
+        _current, proposed = _structured_patch(svc, self._finding("status", "defunct", Category.ACTIVELY_BAD))
+        self.assertEqual(proposed, "defunct")  # not downgraded to "inactive"
+
+    def test_temporary_closure_keeps_its_value(self):
+        from app.services.maintenance_bridge import _structured_patch
+        svc = self._svc()
+        _current, proposed = _structured_patch(svc, self._finding("status", "temporarily closed", Category.ACTIVELY_BAD))
+        self.assertEqual(proposed, "temporarily closed")
+
+    def test_closure_status_patch_validates_against_hsds(self):
+        # The proposed status must be a valid HSDS enum value so apply_patch doesn't reject it.
+        from tests.helpers import make_container
+        from app.db import dumps, now_iso
+        import uuid
+        c = make_container()
+        sid = str(uuid.uuid4())
+        c.db.run("INSERT INTO resource (id,type,org_id,source,status,data,version,created_at,updated_at,deleted) "
+                 "VALUES (?,?,?,?,?,?,?,?,?,0)",
+                 (sid, "service", None, "t", "active",
+                  dumps({"id": sid, "name": "X", "status": "active"}), 1, now_iso(), now_iso()))
+        self.assertEqual(c.store.validate_patch(sid, {"status": "defunct"}), [])            # valid HSDS status
+        self.assertEqual(c.store.validate_patch(sid, {"status": "temporarily closed"}), []) # valid HSDS status

@@ -33,7 +33,7 @@ variable "website_backend" { default = "live" }
 variable "enable_opensearch" { default = false }
 variable "import_schedule" { default = "cron(0 11 * * ? *)" }      # 04:00 Pacific, daily
 variable "maintenance_schedule" { default = "cron(0 12 * * ? *)" } # after the import
-variable "maintenance_batch" { default = 200 }
+
 variable "schedules_enabled" { default = false }
 variable "workshop_mode" { default = false }
 variable "odrs_api_url" { default = "" }
@@ -50,3 +50,7 @@ locals {
 }
 data "aws_availability_zones" "this" { state = "available" }
 data "aws_caller_identity" "me" {}
+
+variable "maintenance_recheck_days" { default = 30 }
+variable "maintenance_safety_factor" { default = 1.2 }
+variable "maintenance_max_batch" { default = 0 }

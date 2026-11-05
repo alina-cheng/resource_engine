@@ -40,6 +40,8 @@ class Settings:
     import_interval_minutes: int = 1440
     maintenance_interval_minutes: int = 1440
     maintenance_recheck_days: int = 30
+    maintenance_safety_factor: float = 1.2
+    maintenance_max_batch: int = 0
     content_dir: Path = ROOT / "content"
     sources_path: Path = ROOT / "config" / "sources.json"
 
@@ -89,5 +91,7 @@ def load_settings() -> Settings:
         import_interval_minutes=int(_env("IMPORT_INTERVAL_MINUTES", "1440")),
         maintenance_interval_minutes=int(_env("MAINTENANCE_INTERVAL_MINUTES", "1440")),
         maintenance_recheck_days=int(_env("MAINTENANCE_RECHECK_DAYS", "30")),
+        maintenance_safety_factor=float(_env("MAINTENANCE_SAFETY_FACTOR", "1.2")),
+        maintenance_max_batch=int(_env("MAINTENANCE_MAX_BATCH", "0")),
         sources_path=Path(_env("SOURCES_CONFIG", str(ROOT / "config" / "sources.json"))),
     )

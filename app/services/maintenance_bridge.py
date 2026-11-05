@@ -267,10 +267,9 @@ def _structured_patch(svc: dict, finding: Finding):
         return current, [{"id": make_id("maint", "accessibility", sid, proposed_text), "description": proposed_text}]
 
     # status, email, eligibility_description, schedules, accessibility: use the display value.
-    # For status, map the engine's "defunct"/"temporarily closed" to the stored vocabulary.
-    if field == "status":
-        mapping = {"defunct": "inactive", "temporarily closed": "inactive"}
-        return (current, mapping.get(proposed_text, proposed_text))
+    # The comparator emits "defunct" / "temporarily closed", which are exactly the HSDS 3.2.3
+    # status enum values (alongside "active"/"inactive"), so the proposal is stored as-is: a
+    # permanent closure keeps the strong "defunct" signal rather than a generic "inactive".
     return (current, proposed_text)
 
 

@@ -171,7 +171,7 @@ export function admin(page, need) {
     const { reports } = await api(`/admin/reports${qs({ status })}`);
     const resolve = async (id) => { try { await api(`/admin/reports/${id}/resolve`, { method: "POST" }); toast("Marked resolved."); refresh(); } catch (e) { toast(e.message); } };
     show(h("h1", null, "User reports"),
-      h("p", { class: "muted" }, "Listings a help seeker, provider or admin flagged as wrong. Each report forces a fresh AI check of that record and raises a user_reported flag for review; approving any proposed change still happens in Review."),
+      h("p", { class: "muted" }, "Listings a help seeker, provider or admin flagged as wrong. Each report selects the record for the next maintenance run and raises a user_reported flag for review; the AI re-reviews only if the page changed since the last review. Approving any proposed change still happens in Review."),
       h("div", { class: "row" }, ["open", "resolved"].map((s) => h("a", { class: "chip", href: `#/admin/reports${qs({ status: s })}`, style: status === s ? "border-color:var(--tide);background:var(--tide-l)" : "" }, LABEL[s] || s))),
       h("div", { style: "margin-top:.75rem" }, table(["When", "Listing", "Organization", "What they reported", "From", "Status", ""], reports.map((r) => [
         fmtDate(r.created_at),
@@ -179,7 +179,7 @@ export function admin(page, need) {
         r.org_name || "—",
         r.note || h("span", { class: "muted" }, "(no note)"),
         r.reporter_email || "—",
-        badge(r.status === "open" ? "discrepancy" : "verified"),
+        badge(r.status === "open" ? "user_reported" : "resolved"),
         r.status === "open" ? h("button", { class: "ghost sm", onclick: () => resolve(r.id) }, "Mark resolved") : h("span", { class: "small muted" }, `by ${r.resolved_by || "—"}`),
       ]), status === "open" ? "No open user reports." : "No resolved reports yet.")));
   }
