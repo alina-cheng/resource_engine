@@ -18,10 +18,9 @@ class IngestService:
     def __init__(self, settings, db: Database, store: HsdsStore, blob, proposals: ChangeRequests):
         self.settings, self.db, self.store, self.blob, self.proposals = settings, db, store, blob, proposals
 
-    def _preserve_public_ids(self, mapped, source, previous=None):
-        """Reuse pre-integration public IDs when their source-native identity is known."""
-        if previous is None:
-            previous = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (source,))
+    def _build_identity_maps(self, source):
+        """Index the existing source snapshot once per import, not once per record."""
+        previous = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (source,))
         identities = {}
         links = {}
         for row in previous:
@@ -32,6 +31,13 @@ class IngestService:
                 identities[(row["type"], str(native))] = row["id"]
             if row["type"] == "service_at_location":
                 links[(data.get("service_id"), data.get("location_id"))] = row["id"]
+        return identities, links
+
+    def _preserve_public_ids(self, mapped, source, identity_maps=None):
+        """Reuse pre-integration public IDs when their source-native identity is known."""
+        if identity_maps is None:
+            identity_maps = self._build_identity_maps(source)
+        identities, links = identity_maps
         aliases = {}
         for resource in mapped.resources:
             native = ((resource.data.get("x_resource_engine") or {}).get("source") or {}).get("record_id")
@@ -67,16 +73,16 @@ class IngestService:
                   "shared_disagreements": 0, "partial_records": 0, "objects_received": 0,
                   "objects_stored": 0, "objects_quarantined": 0}
         seen: dict[str, str] = {}   # resource id -> hash of first version seen in this run
-        previous_ids = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (cfg.name,))
         status, error = "completed", None
         try:
+            identity_maps = self._build_identity_maps(cfg.name)
             for batch in adapter.fetch(since):
                 key = self.blob.put(f"raw/{cfg.name}/{run_id}/{batch.batch_id}", batch.raw)   # as received (R1.3)
                 self.db.run("INSERT INTO raw_payload (id,source,native_id,fetched_at,blob_key,run_id) VALUES (?,?,?,?,?,?)",
                             (new_id(), cfg.name, batch.batch_id, started, key, run_id))
                 for rec in batch.records:
                     counts["received"] += 1
-                    self._one(adapter, cfg, rec, started, run_id, counts, seen, previous_ids)
+                    self._one(adapter, cfg, rec, started, run_id, counts, seen, identity_maps)
         except Exception as e:  # noqa: BLE001 - fetch-level failure; counts so far remain truthful
             status, error = "failed", f"{type(e).__name__}: {e}"
         balanced = counts["received"] == counts["stored"] + counts["quarantined"]
@@ -89,13 +95,13 @@ class IngestService:
                      dumps({"error": error, **counts}), run_id))
         return {"run_id": run_id, "source": cfg.name, "status": status, "error": error, **counts}
 
-    def _one(self, adapter, cfg, rec, fetched_at, run_id, counts, seen, previous_ids=None) -> None:
+    def _one(self, adapter, cfg, rec, fetched_at, run_id, counts, seen, identity_maps=None) -> None:
         nid = "?"
         mapped = None
         try:
             nid = adapter.native_id(rec)
             mapped = adapter.map(rec)
-            self._preserve_public_ids(mapped, cfg.name, previous_ids)
+            self._preserve_public_ids(mapped, cfg.name, identity_maps)
             if not mapped.resources:
                 raise MappingError("No valid top-level HSDS objects remain; " + "; ".join(
                     f"{kind}: {', '.join(reasons)}" for kind, _, reasons in mapped.quarantined_objects))
@@ -115,7 +121,7 @@ class IngestService:
                     # First version seen in a run wins; later disagreements are counted, not flip-flopped.
                     h = dumps(r.data)
                     if r.id in seen or r.id in newly_seen:
-                        if (seen | newly_seen)[r.id] != h:
+                        if newly_seen.get(r.id, seen.get(r.id)) != h:
                             counts["shared_disagreements"] += 1
                         continue
                     newly_seen[r.id] = h
