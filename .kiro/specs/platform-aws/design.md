@@ -2,6 +2,7 @@
 
 - `infra/terraform/*.tf`; `.github/workflows/ci.yml`, `deploy.yml`; `Dockerfile`, `docker-compose.yml`, `Makefile`.
 - `docs/deployment.md`.
+- `sources_config` and `allow_sample_sources` select an explicit synthetic workshop dataset consistently for web and jobs. Defaults retain the live source configuration and reject sample files outside local mode.
 - Expiring AWS Workshop Studio account: login, temporary CLI profile, regional restrictions and export/redeployment requirements are documented in `docs/workshop-aws.md`. Production OIDC remains a separate delivery path; temporary event credentials are not a durable GitHub secret.
 - Integration status and prompt/spec synchronization: `docs/kiro-and-prompts-audit.md`. Do not mark Terraform apply or real service calls complete before execution evidence exists.
 - `infra/bootstrap`: encrypted/versioned state bucket and repository/environment-scoped GitHub OIDC role. Apply requires authorized AWS credentials and the event's IAM permissions; existing OIDC provider is reused by default.

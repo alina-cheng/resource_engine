@@ -3,6 +3,7 @@
 - [x] Dockerfile, compose, Makefile, local demo
 - [x] CI: tests, JS syntax, docker build, terraform validate
 - [x] Terraform: network, Aurora, S3, Cognito, ECS, ALB, Scheduler, optional OpenSearch
+- [x] Terraform variables for explicit synthetic source configuration shared by web and jobs
 - [ ] Terraform validated and applied in a sandbox account
 - [ ] Cognito and Bedrock paths exercised
 - [ ] CloudWatch alarms and dashboards

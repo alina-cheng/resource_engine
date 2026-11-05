@@ -84,4 +84,5 @@ def test_pg_existing_schema_upgrade(pg):
     pg.db.init_schema()
     pg.db.init_schema()
     assert pg.db.q("SELECT flags FROM check_result") == []
-    assert len(pg.db.q("SELECT * FROM schema_migration")) == 2
+    assert pg.db.q("SELECT record_hash FROM check_result") == []
+    assert len(pg.db.q("SELECT * FROM schema_migration")) == 3

@@ -50,9 +50,12 @@ class MaintenanceEvaluation(unittest.TestCase):
                 self.assertEqual(cr["status"], "pending")
 
     def test_unchanged_pages_are_skipped_on_the_next_run(self):
-        again = self.c.maintenance.run(scope="all", trigger="test", initiated_by="test", force=False)
+        # Isolate this case from approvals in the other tests: an applied edit is now due immediately.
+        c, _ = generated_container(20, 10, 11)
+        c.maintenance.run(scope="all", force=True, trigger="test", initiated_by="test")
+        again = c.maintenance.run(scope="all", trigger="test", initiated_by="test", force=False)
         self.assertEqual(again["checked"], 0)                              # nothing due yet
-        forced_once = self.c.maintenance.run(scope="all", trigger="test", initiated_by="test", force=True, limit=20)
+        forced_once = c.maintenance.run(scope="all", trigger="test", initiated_by="test", force=True, limit=20)
         self.assertEqual(forced_once["checked"], 20)
 
     def test_single_record_check_and_verified_marker(self):

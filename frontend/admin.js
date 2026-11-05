@@ -14,10 +14,12 @@ export function admin(page, need) {
     const s = await api("/admin/stats");
     const total = Object.values(s.check_categories).reduce((a, b) => a + b, 0) || 1;
     const pend = Object.values(s.pending_by_kind).reduce((a, b) => a + b, 0);
-    const act = (label, kind, body) => h("button", { class: "ghost", onclick: async (e) => {
-      e.target.disabled = true; try { await job(kind, body); toast(`${label} finished.`); refresh(); } catch (x) { toast(x.message); e.target.disabled = false; } } }, label);
+    const act = (label, kind, body) => h("button", { class: "ghost", disabled: kind === "/admin/maintenance/run" && !!s.maintenance_job, onclick: async (e) => {
+      e.target.disabled = true; try { await job(kind, body, (status) => {
+        const p = status.result || {}; e.target.textContent = p.target != null ? `Checking ${p.checked || 0} / ${p.target}` : `${label}: ${status.status}`;
+      }); toast(`${label} finished.`); refresh(); } catch (x) { toast(x.message); e.target.disabled = false; e.target.textContent = label; } } }, label);
     show(h("div", { class: "row spread" }, h("h1", null, "Overview"),
-      h("div", { class: "row" }, act("Import all sources", "/admin/imports/run", {}), act("Check due records", "/admin/maintenance/run", {}), act("Rebuild search index", "/admin/reindex", {}))),
+      h("div", { class: "row" }, act("Import all sources", "/admin/imports/run", {}), act(`Check all ${s.counts.service || 0} records`, "/admin/maintenance/run", { force: true, limit: s.counts.service || 0 }), act("Check all due records", "/admin/maintenance/run", {}), act("Rebuild search index", "/admin/reindex", {}))),
       h("div", { class: "grid cols-3" },
         h("a", { class: "card stat", href: "#/admin/review" }, h("b", null, pend), "changes waiting for review", h("div", { class: "muted small" }, Object.entries(s.pending_by_kind).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(" · "))),
         h("a", { class: "card stat", href: "#/admin/records" }, h("b", null, s.counts.service || 0), "services", h("div", { class: "muted small" }, `${s.counts.organization || 0} organizations · ${s.counts.location || 0} locations`)),
@@ -26,13 +28,16 @@ export function admin(page, need) {
         h("a", { class: "card stat", href: "#/admin/documents?status=pending" }, h("b", null, s.docs_pending), "documents waiting for approval"),
         h("a", { class: "card stat", href: "#/admin/reports" }, h("b", null, s.open_reports || 0), "user reports to review", h("div", { class: "muted small" }, "listings a person flagged as wrong"))),
       h("h2", { style: "margin-top:1.5rem" }, "Record health"),
+      h("p", { class: "muted small" }, `${s.maintenance_coverage?.checked || 0} / ${s.maintenance_coverage?.total || 0} records checked · ${s.maintenance_coverage?.unchecked || 0} awaiting first check · ${s.maintenance_coverage?.needs_recheck || 0} changed since their check.`),
+      s.maintenance_job ? h("p", { role: "status" }, `Maintenance ${s.maintenance_job.status}: ${s.maintenance_job.result?.checked || 0} / ${s.maintenance_job.result?.target ?? "…"} processed. Updates automatically.`) : null,
       h("div", { class: "card" }, h("div", { class: "bars" }, CATS.map((c) => h("a", { class: "bar-row", href: `#/admin/records${qs({ category: c })}` }, badge(c),
         h("div", { class: "bar-track" }, h("div", { class: "bar-fill", style: `width:${((s.check_categories[c] || 0) / total) * 100}%` }), ), h("span", null, s.check_categories[c] || 0))))),
       h("h2", { style: "margin-top:1.5rem" }, "Latest imports"), importRuns(s.last_imports),
       h("h2", { style: "margin-top:1.5rem" }, "Latest maintenance runs"),
       table(["Started", "Scope", "Trigger", "Status", "Result"], s.last_maintenance.map((r) => [fmtDate(r.started_at), r.scope, `${r.trigger} · ${r.initiated_by}`, badge(r.status), countsLine(JSON.parse(r.counts || "{}"))]), "No maintenance runs yet."));
+    if (s.maintenance_job) setTimeout(() => { if (location.hash.replace(/\/$/, "") === "#/admin") refresh(); }, 5000);
   }
-  const countsLine = (c) => ["actively_bad", "check_failed", "discrepancy", "missing_information", "verified"].filter((k) => c[k]).map((k) => `${c[k]} ${LABEL[k].toLowerCase()}`).join(", ") || "—";
+  const countsLine = (c) => (c.target != null ? `${c.checked || 0}/${c.target} processed · ` : "") + (["actively_bad", "check_failed", "discrepancy", "missing_information", "verified"].filter((k) => c[k]).map((k) => `${c[k]} ${LABEL[k].toLowerCase()}`).join(", ") || "—");
   const importRuns = (runs) => table(["Started", "Source", "Received records", "Imported records", "Held records", "Partial records", "Held objects", "Clashes", "Balanced", "Status"],
     runs.map((r) => { const d = JSON.parse(r.detail || "{}"); return [fmtDate(r.started_at), r.source, r.received, r.stored, r.quarantined, d.partial_records || 0, d.objects_quarantined || 0, r.clashes, r.status === "running" ? "…" : r.received === r.stored + r.quarantined ? "Yes" : "No", badge(r.status)]; }), "No imports yet.");
 
@@ -67,7 +72,7 @@ export function admin(page, need) {
     const d = await api(`/admin/maintenance/results${qs({ category: p.category, q: p.q, source: p.source, page: pg, per_page: 25 })}`);
     const q = h("input", { value: p.q || "", placeholder: "Search by name…", "aria-label": "Search records", style: "max-width:260px" });
     const go = (o) => (location.hash = `#/admin/records${qs({ ...p, ...o })}`);
-    show(h("div", { class: "row spread" }, h("h1", null, "Records"), h("button", { class: "ghost", onclick: async (e) => { e.target.disabled = true; await job("/admin/maintenance/run"); toast("Check finished."); refresh(); } }, "Check due records now")),
+    show(h("div", { class: "row spread" }, h("h1", null, "Records"), h("button", { class: "ghost", onclick: async (e) => { e.target.disabled = true; try { await job("/admin/maintenance/run", {}, (status) => { const p = status.result || {}; e.target.textContent = p.target != null ? `Checking ${p.checked || 0} / ${p.target}` : status.status; }); toast("Check finished."); refresh(); } catch (error) { toast(error.message); e.target.disabled = false; } } }, "Check all due records now")),
       h("div", { class: "row" }, h("select", { style: "width:auto", "aria-label": "Category", onchange: (e) => go({ category: e.target.value, page: 1 }) },
         h("option", { value: "" }, "All categories"), CATS.map((c) => h("option", { value: c, selected: p.category === c ? true : null }, LABEL[c]))),
         h("select", { style: "width:auto", "aria-label": "Source", onchange: (e) => go({ source: e.target.value, page: 1 }) }, h("option", { value: "" }, "All sources"), ["odrs", "ndp"].map((s) => h("option", { value: s, selected: p.source === s ? true : null }, s))),

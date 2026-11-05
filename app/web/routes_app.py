@@ -272,12 +272,22 @@ def _enrich_crs(crs: list[dict]) -> list[dict]:
 @auth_required("admin")
 def admin_stats():
     c = container()
-    cats = {r["category"]: r["n"] for r in c.db.q("SELECT category, COUNT(*) AS n FROM check_result GROUP BY category")}
+    cats = {r["category"]: r["n"] for r in c.db.q(
+        "SELECT c.category, COUNT(*) AS n FROM check_result c JOIN resource r ON r.id=c.resource_id "
+        "WHERE r.type='service' AND r.deleted=0 GROUP BY c.category")}
     total_services = c.store.counts().get("service", 0)
     cats["unchecked"] = max(0, total_services - sum(cats.values()))
+    stale = c.db.one("SELECT COUNT(*) AS n FROM check_result c JOIN resource r ON r.id=c.resource_id "
+                     "WHERE r.type='service' AND r.deleted=0 AND (c.record_version IS NULL OR c.record_version<>r.version)")["n"]
+    active_job = c.db.one("SELECT id,status,result FROM job_run WHERE kind='maintenance' AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1")
+    if active_job:
+        active_job["result"] = loads(active_job["result"], {})
     pend = {r["kind"]: r["n"] for r in c.db.q("SELECT kind, COUNT(*) AS n FROM change_request WHERE status='pending' GROUP BY kind")}
     open_reports = c.db.one("SELECT COUNT(*) AS n FROM user_report WHERE status='open'")["n"]
     return jsonify({"counts": c.store.counts(), "check_categories": cats, "pending_by_kind": pend,
+                    "maintenance_coverage": {"total": total_services, "checked": total_services-cats["unchecked"],
+                                             "unchecked": cats["unchecked"], "needs_recheck": stale},
+                    "maintenance_job": active_job,
                     "open_reports": open_reports,
                     "seekers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='seeker'")["n"],
                     "providers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='provider'")["n"],
@@ -521,6 +531,12 @@ def admin_import_upload():
             os.unlink(tmp.name)
         except OSError:
             pass
+    if c.settings.auto_maintenance_after_import and result.get("status") == "completed" and result.get("received", 0):
+        from app.jobs.runner import JobError
+        try:
+            result["maintenance_job"] = c.jobs.enqueue_maintenance("upload:" + g.principal.email)
+        except JobError as error:
+            result["maintenance_error"] = str(error)
     return jsonify({**result, "filename": f.filename}), 201
 
 

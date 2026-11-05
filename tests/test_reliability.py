@@ -72,7 +72,8 @@ def test_upgrade_adds_flags_preserves_ids_and_is_idempotent(tmp_path):
     db.init_schema()
     db.init_schema()
     assert db.one("SELECT flags FROM check_result WHERE resource_id='existing'") == {"flags": None}
-    assert len(db.q("SELECT * FROM schema_migration")) == 2
+    assert db.one("SELECT record_hash FROM check_result WHERE resource_id='existing'")["record_hash"] is None
+    assert len(db.q("SELECT * FROM schema_migration")) == 3
 
 
 def cognito():
