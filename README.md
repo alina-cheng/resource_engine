@@ -4,7 +4,13 @@
 
 ![HSDS 3.2.3](https://img.shields.io/badge/HSDS-3.2.3-1E3A8A) ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB) ![Runs on AWS](https://img.shields.io/badge/Runs%20on-AWS-F97316) ![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC)
 
-[Architecture](#architecture) · [Quick start](#quick-start) · [Real data](#real-data) · [Deploy](#deploy-to-aws) · [Status](#project-status) · [Scaling](#scaling) · [Docs](#documentation)
+[Live demo](#live-demo) · [Architecture](#architecture) · [Quick start](#quick-start) · [Real data](#real-data) · [Deploy](#deploy-to-aws) · [Status](#project-status) · [Scaling](#scaling) · [Docs](#documentation)
+
+## Live demo
+
+<img src="docs/demo-qr.png" alt="QR code for the live demo" width="160">
+
+[Open the demo](http://resource-engine-1510565218.us-west-2.elb.amazonaws.com/). It runs on synthetic data over HTTP, so don't enter real personal information or passwords.
 
 ## Why this exists
 
@@ -20,7 +26,7 @@ The Resource Engine moves legacy data into one open standard, checks records aga
 
 ## Architecture
 
-![One Degree Resource Engine architecture](docs/architecture.png)
+![One Degree Resource Engine architecture](docs/od_architechture.png)
 
 The diagram shows the target design; dashed lines are planned. Today, the ODRS data API is connected and imports directly in local runs, and 211 NDP sample files and JSON upload also work. Spreadsheets need an adapter.
 
@@ -56,6 +62,10 @@ AI proposes and people decide. The loop runs as a one-off job, started daily by 
 Search and AI chat go through the same web app and API. Planned: direct outreach from specialists to providers, and seekers asking specialists for help.
 
 ### AWS deployment
+
+![One Degree Resource Engine AWS deployment](docs/aws-architecture.png)
+
+The web service and jobs run in public subnets behind the load balancer, and Aurora runs in private subnets. The two job boxes are the same one-off task. The daily schedule is off by default and on in the current deployment.
 
 | Diagram part | Runs on |
 |---|---|
