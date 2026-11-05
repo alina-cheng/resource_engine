@@ -11,6 +11,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from datetime import time
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
@@ -78,8 +79,17 @@ TABULAR_REQUIRED: dict[str, list[str]] = {
 
 # Resource Engine data-quality rules: checks HSDS itself doesn't make, for values that are
 # valid HSDS but plainly wrong. Kept short and labelled so they're never mistaken for HSDS.
+def _offset_time(value):
+    try:
+        return time.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
+
+
 QUALITY_RULES: dict[str, list[tuple[str, callable, str]]] = {
     "phone": [("number", lambda v: any(c.isdigit() for c in v), "contains no digits")],
+    "schedule": [(field, _offset_time, "must be a local time with a UTC offset")
+                 for field in ("opens_at", "closes_at")],
 }
 
 

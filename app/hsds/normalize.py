@@ -1,7 +1,7 @@
 """Preserve local schedule context outside HSDS's numeric timezone property."""
 import copy
 from datetime import datetime, time
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def normalize_document(data, kind=None, timezone="America/Los_Angeles"):
@@ -21,8 +21,12 @@ def normalize_document(data, kind=None, timezone="America/Los_Angeles"):
                 local = node.setdefault("x_resource_engine", {}).setdefault("local_schedule", {"timezone": zone})
                 for field in ("opens_at", "closes_at"):
                     if node.get(field):
-                        raw = local.setdefault(field, node[field][:5])
-                        moment = datetime.combine(datetime.now(ZoneInfo(zone)).date(), time.fromisoformat(raw), ZoneInfo(zone))
+                        raw = node[field][:5]
+                        local[field] = raw  # A reviewed time edit must supersede retained metadata.
+                        try:
+                            moment = datetime.combine(datetime.now(ZoneInfo(zone)).date(), time.fromisoformat(raw), ZoneInfo(zone))
+                        except (ValueError, ZoneInfoNotFoundError):
+                            continue  # Leave invalid input visible for object-level quarantine.
                         offset = moment.strftime("%z")
                         node[field] = f"{moment:%H:%M}{offset[:3]}:{offset[3:]}"
                 if isinstance(node.get("timezone"), str):

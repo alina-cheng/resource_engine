@@ -108,6 +108,14 @@ class OdrsApiTests(unittest.TestCase):
         self.assertEqual(out["status"], "completed")
         self.assertEqual(get.call_count, 1)
 
+    def test_configured_bearer_auth_survives_the_api_key_transport_merge(self):
+        cfg = SourceConfig("odrs", "odrs", URL, options={"bearer_env": "ODRS_TOKEN"})
+        with patch.dict(os.environ, {"ODRS_TOKEN": "test-bearer"}), patch("requests.get", return_value=page(1, total_pages=1)) as get:
+            out = self.c.ingest.run(cfg)
+        self.assertEqual(out["status"], "completed")
+        self.assertEqual(get.call_args.kwargs["headers"], {"Authorization": "Bearer test-bearer"})
+        self.assertNotIn("api_key", get.call_args.kwargs["params"])
+
 
 class OdrsOrgDescriptionTests(unittest.TestCase):
     ORG_URL = "https://odrs.test:3002/v1/organizations"

@@ -10,3 +10,5 @@
 - Scheduling: EventBridge Scheduler runs `python -m app.jobs.run maintenance` (no `--limit`; the run self-sizes).
 
 See `docs/decisions.md` (ADR-9 port, ADR-10 report-trigger, ADR-11 self-sizing schedule), `docs/detailed-design.md` for diagrams and `docs/technical-spec.md` for algorithms.
+
+- Integration preserves exact missing-field baselines (None is not changed into []), converts hours/accessibility proposals to valid typed HSDS, includes per-service location-link hours in comparisons, and recognizes original NDP county descriptions. Maintenance failures close the run as failed; batch limits also bound report-forced checks. Prompt text/grounding behavior is unchanged; configured model ID is passed explicitly to BedrockInvoker.

@@ -21,7 +21,7 @@
 | elig-*, community-*, citizenship-*, gender-* flags | taxonomy "One Degree Eligibility" + attribute | |
 | phones, locations[].phones | phone | extension split from number; de-duplicated |
 | locations[] | location, address, service_at_location | address omitted if address, city or ZIP missing (warning) |
-| weekly schedule | schedule (WEEKLY, byday, opens_at/closes_at with UTC offset; the IANA zone is kept in x_resource_engine.local_schedule) | days with identical hours grouped; schedule notes kept as a notes schedule |
+| weekly schedule | schedule (WEEKLY, byday, opens_at/closes_at with UTC offset) | original per-service/location-link scope preserved; IANA/local time context under x_resource_engine.local_schedule |
 | attachments, images, rating*, slugs, translations | not mapped | stay in the raw store |
 
 ## NDP (`app/adapters/ndp.py`)
@@ -38,4 +38,4 @@
 | meta.lastVerified / lastUpdated | assured_date / last_modified | |
 
 ## Rules applied to every record
-Empty properties omitted; UUIDv5 ids; every object validated before storage; one source record is stored or quarantined as a unit.
+Original core mappings and UUIDv5 IDs live in app/adapters/transform; FINAL enrichment passes the same official validator. Empty properties are omitted. Invalid objects and dependent children are isolated with reasons; valid independent objects are assembled and written atomically. Unmappable sources and write failures are quarantined as a whole. Source-record and object counters balance separately, with partial imports explicit in the admin console. Sample NDP pages contain four incomplete addresses and three non-phone strings in phone fields: seven held objects across six partially imported sources, while all twenty source records retain their valid data.

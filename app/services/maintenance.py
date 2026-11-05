@@ -41,7 +41,7 @@ class MaintenanceService:
         self._site = WebsiteSourceAdapter(website)
         # The grounded Bedrock extractor runs only when a real (non-mock) LLM is configured;
         # otherwise the offline rule extractor supplies facts, so tests and the demo need no model.
-        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker()
+        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker(model_id=settings.bedrock_model_id)
         self._rule_facts = None if not getattr(llm, "is_mock", True) else _RuleFactSource(extractor)
         self.reports = ReportService(db)
 
@@ -108,20 +108,25 @@ class MaintenanceService:
         counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0,
                                                "user_reported": 0, "batch_target": effective_limit or 0}
         cache: dict[str, object] = {}
-        for row in rows:
-            # A reported record is selected for this run and always flagged for a human, but it
-            # still respects the hash-skip: the AI re-reviews only if the page changed since the
-            # last review. A person looks because a person flagged it, not because the AI did.
-            row_reported = row["id"] in reported
-            out = self.check_service(row, cache, run_id, force, reported=row_reported)
-            counts["checked"] += 1
-            if out.get("flagged"):
-                counts["user_reported"] += 1
-            if out.get("skipped"):
-                counts["skipped_unchanged"] += 1
-            else:
-                counts[out["category"]] += 1
-                counts["proposals"] += out["proposals"]
+        try:
+            for row in rows[:limit] if limit is not None else rows:
+                # A reported record is selected for this run and always flagged for a human, but it
+                # still respects the hash-skip: the AI re-reviews only if the page changed since the
+                # last review. A person looks because a person flagged it, not because the AI did.
+                row_reported = row["id"] in reported
+                out = self.check_service(row, cache, run_id, force, reported=row_reported)
+                counts["checked"] += 1
+                if out.get("flagged"):
+                    counts["user_reported"] += 1
+                if out.get("skipped"):
+                    counts["skipped_unchanged"] += 1
+                else:
+                    counts[out["category"]] += 1
+                    counts["proposals"] += out["proposals"]
+        except Exception as error:
+            self.db.run("UPDATE maintenance_run SET finished_at=?,status='failed',counts=? WHERE id=?",
+                        (now_iso(), dumps(counts | {"error": type(error).__name__}), run_id))
+            raise
         self.db.run("UPDATE maintenance_run SET finished_at=?, status='completed', counts=? WHERE id=?", (now_iso(), dumps(counts), run_id))
         return {"run_id": run_id, **counts}
 

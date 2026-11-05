@@ -9,7 +9,7 @@ services:
       JWT_SECRET: local-dev-secret-change-me
       SOURCES_CONFIG: /srv/config/sources.demo.json
       WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
-    volumes: ["appdata:/data", "./data/generated:/srv/data/generated"]
+    volumes: ["appdata:/data"]
     command: >
       sh -c "python -m app.demo --no-serve && gunicorn app.main:app --bind 0.0.0.0:8000 --workers 1 --threads 4"
   app-pg:
@@ -26,7 +26,7 @@ services:
       JWT_SECRET: local-dev-secret-change-me
       SOURCES_CONFIG: /srv/config/sources.demo.json
       WEBSITE_SAMPLES_PATH: /srv/data/generated/websites.json
-    volumes: ["pgappdata:/data", "./data/generated:/srv/data/generated"]
+    volumes: ["pgappdata:/data"]
     command: >
       sh -c "python -m app.demo --no-serve && gunicorn app.main:app --bind 0.0.0.0:8000 --workers 1 --threads 4"
   db:

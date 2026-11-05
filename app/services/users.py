@@ -129,10 +129,51 @@ class CognitoAuth:  # pragma: no cover - needs AWS
         try:
             r = self.idp.initiate_auth(ClientId=self.s.cognito_client_id, AuthFlow="USER_PASSWORD_AUTH",
                                        AuthParameters={"USERNAME": email, "PASSWORD": password})
-        except self.idp.exceptions.NotAuthorizedException as e:
-            raise AuthError("Email or password is incorrect.") from e
-        token = r["AuthenticationResult"]["IdToken"]
+        except self.idp.exceptions.ClientError as e:
+            raise AuthError("Login failed. Check your credentials and account status.") from e
+        return self._login_result(r, email)
+
+    def _login_result(self, result: dict, username: str) -> dict:
+        if result.get("ChallengeName"):
+            import json
+            challenge = result["ChallengeName"]
+            if challenge not in {"NEW_PASSWORD_REQUIRED", "SOFTWARE_TOKEN_MFA", "SMS_MFA", "EMAIL_OTP"}:
+                raise AuthError("This account needs an authentication step that must be completed with your administrator.")
+            params = result.get("ChallengeParameters", {})
+            username = params.get("USER_ID_FOR_SRP", username)
+            required = json.loads(params.get("requiredAttributes", "[]"))
+            envelope = jwt.encode({"purpose": "cognito-challenge", "challenge": challenge,
+                                   "session": result["Session"], "username": username,
+                                   "required": required, "exp": int(time.time()) + 300},
+                                  self.s.jwt_secret, algorithm="HS256")
+            return {"challenge": challenge, "challenge_token": envelope,
+                    "required_attributes": [a.removeprefix("userAttributes.") for a in required]}
+        token = result["AuthenticationResult"]["IdToken"]
         return {"token": token, "user": _public(self._user_from(self.verify(token)))}
+
+    def respond_challenge(self, challenge_token: str, answer: str, attributes: dict | None = None) -> dict:
+        try:
+            state = jwt.decode(challenge_token, self.s.jwt_secret, algorithms=["HS256"])
+            if state.get("purpose") != "cognito-challenge":
+                raise AuthError("Invalid login challenge.")
+            challenge = state["challenge"]
+            keys = {"NEW_PASSWORD_REQUIRED": "NEW_PASSWORD", "SOFTWARE_TOKEN_MFA": "SOFTWARE_TOKEN_MFA_CODE",
+                    "SMS_MFA": "SMS_MFA_CODE", "EMAIL_OTP": "EMAIL_OTP_CODE"}
+            responses = {"USERNAME": state["username"], keys[challenge]: answer}
+            if challenge == "NEW_PASSWORD_REQUIRED":
+                for required in state.get("required", []):
+                    name = required.removeprefix("userAttributes.")
+                    value = (attributes or {}).get(name)
+                    if not value:
+                        raise AuthError(f"Enter the required account attribute: {name}.")
+                    responses[f"userAttributes.{name}"] = str(value)
+            result = self.idp.respond_to_auth_challenge(ClientId=self.s.cognito_client_id,
+                        ChallengeName=challenge, Session=state["session"], ChallengeResponses=responses)
+            return self._login_result(result, state["username"])
+        except (jwt.PyJWTError, KeyError) as error:
+            raise AuthError("Login challenge expired or is invalid. Log in again.") from error
+        except self.idp.exceptions.ClientError as error:
+            raise AuthError("The password or verification code was rejected. Try again.") from error
 
     def register_seeker(self, email: str, name: str, password: str) -> dict:
         self.idp.admin_create_user(UserPoolId=self.s.cognito_user_pool_id, Username=email, MessageAction="SUPPRESS",
@@ -142,22 +183,44 @@ class CognitoAuth:  # pragma: no cover - needs AWS
         self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName="seeker")
         return self.login(email, password)
 
-    def create_provider_login(self, email: str, name: str) -> None:
+    def create_provider_login(self, email: str, name: str, role: str = "provider", password: str | None = None) -> None:
+        if role not in {"admin", "provider"}:
+            raise AuthError("Invalid staff role.")
         self.idp.admin_create_user(UserPoolId=self.s.cognito_user_pool_id, Username=email,
+                                   **({"TemporaryPassword": password} if password else {}),
                                    UserAttributes=[{"Name": "email", "Value": email}, {"Name": "name", "Value": name},
                                                    {"Name": "email_verified", "Value": "true"}])
-        self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName="provider")
+        self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName=role)
+
+    def ensure_demo_login(self, email: str, name: str, role: str, password: str) -> None:
+        """Create or reset a demo login with a permanent password. Demo addresses are not ours, so no email is sent."""
+        try:
+            self.idp.admin_create_user(UserPoolId=self.s.cognito_user_pool_id, Username=email, MessageAction="SUPPRESS",
+                                       UserAttributes=[{"Name": "email", "Value": email}, {"Name": "name", "Value": name},
+                                                       {"Name": "email_verified", "Value": "true"}])
+        except self.idp.exceptions.UsernameExistsException:
+            pass
+        self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName=role)
+        self.idp.admin_set_user_password(UserPoolId=self.s.cognito_user_pool_id, Username=email, Password=password, Permanent=True)
 
     def verify(self, token: str) -> Principal:
         try:
             key = self.jwks.get_signing_key_from_jwt(token).key
-            c = jwt.decode(token, key, algorithms=["RS256"], audience=self.s.cognito_client_id)
+            c = jwt.decode(token, key, algorithms=["RS256"], audience=self.s.cognito_client_id,
+                           issuer=f"https://cognito-idp.{self.s.aws_region}.amazonaws.com/{self.s.cognito_user_pool_id}",
+                           options={"require": ["sub", "exp", "iss", "aud", "token_use"]})
+            if c["token_use"] != "id" or not c.get("email_verified"):
+                raise AuthError("A verified Cognito identity is required.")
         except jwt.PyJWTError as e:
             raise AuthError("Your session has expired. Log in again.") from e
         groups = c.get("cognito:groups", [])
         role = "admin" if "admin" in groups else "provider" if "provider" in groups else "seeker"
         u = self.users.by_email(c["email"]) or self.users.create(c["email"], c.get("name", c["email"]), role, None,
                                                                  external_id=c["sub"])
+        if not u["active"] or (u.get("external_id") and u["external_id"] != c["sub"]):
+            raise AuthError("Account is inactive or belongs to a different identity.")
+        if not u.get("external_id"):
+            self.users.db.run("UPDATE users SET external_id=? WHERE id=?", (c["sub"], u["id"]))
         if u["role"] != role:
             self.users.db.run("UPDATE users SET role=? WHERE id=?", (role, u["id"]))
         return Principal(u["id"], u["email"], u.get("name") or c["email"], role, u.get("org_id"))

@@ -13,3 +13,6 @@
 - [ ] Bedrock extractor evaluated on real pages
 - [ ] Labelled real-page evaluation set
 - [ ] JavaScript-rendered page handling
+
+- [x] Preserve missing-field proposal baselines, typed proposals and source-specific schedule/county semantics
+- [x] Keep seeded evaluation thresholds unchanged; failure status and proposal-validity regressions covered

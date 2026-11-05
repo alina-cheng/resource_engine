@@ -47,6 +47,14 @@ def login():
     return jsonify(container().auth.login(b.get("email", ""), b.get("password", "")))
 
 
+@bp.post("/auth/challenge")
+def login_challenge():
+    auth, b = container().auth, body()
+    if auth.mode != "cognito":
+        return err(400, "This login method does not use challenges.")
+    return jsonify(auth.respond_challenge(b.get("challenge_token", ""), b.get("answer", ""), b.get("attributes")))
+
+
 @bp.post("/auth/register")
 def register():
     b = body()
@@ -369,7 +377,8 @@ def admin_record(rid):
 @auth_required("admin")
 def admin_edit(rid):
     c, b = container(), body()
-    res = c.store.apply_patch(rid, b.get("patch") or {}, "admin", g.principal.email, note=b.get("note"))
+    res = c.store.apply_patch(rid, b.get("patch") or {}, "admin", g.principal.email, note=b.get("note"),
+                              expected_version=b.get("expected_version"))
     return jsonify(res)
 
 
@@ -402,6 +411,15 @@ def admin_maint_run():
     scope = "service" if b.get("service_id") else "all"
     return jsonify(container().jobs.start("maintenance", wait=bool(b.get("wait")) or request.args.get("wait") == "true", scope=scope,
                                           service_id=b.get("service_id"), force=bool(b.get("force")), limit=b.get("limit"), who=g.principal.email))
+
+
+@bp.get("/admin/jobs/<jid>")
+@auth_required("admin")
+def admin_job(jid):
+    row = container().jobs.get(jid)
+    if not row:
+        raise KeyError(jid)
+    return jsonify(row)
 
 
 @bp.get("/admin/maintenance/results")
@@ -554,8 +572,11 @@ def admin_user_create():
     if b["role"] == "provider" and not c.store.get(b.get("org_id") or ""):
         return err(400, "Choose the organization this provider account belongs to.")
     if c.settings.auth_mode == "cognito":  # pragma: no cover
-        c.auth.create_provider_login(b["email"], b["name"])
-    u = c.users.create(b["email"], b["name"], b["role"], b.get("password"), b.get("org_id"))
+        if c.users.by_email(b["email"]):
+            return err(400, "An account with that email already exists.")
+        c.auth.create_provider_login(b["email"], b["name"], b["role"], b.get("password"))
+    u = c.users.create(b["email"], b["name"], b["role"],
+                       b.get("password") if c.settings.auth_mode == "local" else None, b.get("org_id"))
     return jsonify(u), 201
 
 
@@ -585,4 +606,4 @@ def admin_doc_decide(did):
 @bp.post("/admin/reindex")
 @auth_required("admin")
 def admin_reindex():
-    return jsonify(container().search.reindex())
+    return jsonify(container().jobs.start("reindex"))

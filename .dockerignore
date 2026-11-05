@@ -7,3 +7,12 @@ __pycache__/
 *.tfstate*
 *.tfplan
 .pytest_cache/
+.venv/
+.git/
+.kiro/
+tests/
+local_refs/
+onedegree_resource_engine/
+.env*
+*.tfvars
+*.dump

@@ -1,44 +1,65 @@
 # Deploying to AWS
 
-Not exercised against a real AWS account while this was built: treat the first deployment as a dry run in a sandbox account. `terraform validate` runs in CI.
+Source repository: `alina-cheng/resource_engine`. Use only this repository's root as the build context. Do not publish sibling `local_refs` or the original engine. Local development, CI and Docker install the committed uv.lock.
 
-## 1. One-time setup
-1. **State bucket** (versioned, encrypted S3 bucket) for Terraform state.
-2. **GitHub OIDC role.** Create the GitHub OIDC identity provider (`token.actions.githubusercontent.com`) if absent, then a role trusting your repo:
-```json
-{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"arn:aws:iam::<ACCOUNT>:oidc-provider/token.actions.githubusercontent.com"},
- "Action":"sts:AssumeRoleWithWebIdentity",
- "Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},
- "StringLike":{"token.actions.githubusercontent.com:sub":"repo:<ORG>/<REPO>:environment:production"}}}]}
-```
-Grant it the permissions Terraform needs (ECR, ECS, EC2/VPC, ELB, RDS, S3, Cognito, IAM roles it creates, Secrets Manager, Scheduler, CloudWatch Logs). Start broad in a sandbox, then scope down from CloudTrail.
-3. **Bedrock access.** In the Bedrock console, enable the Anthropic model set in `bedrock_model_id` for your region.
-4. **GitHub settings.** Secret `AWS_DEPLOY_ROLE_ARN`; variables `AWS_REGION`, `TF_STATE_BUCKET`; an Environment named `production` (add required reviewers for a manual gate).
-5. Optional: an ACM certificate ARN for HTTPS (`certificate_arn`) and a Route 53 alias to the ALB.
+Start with the [README deployment guide](../README.md#deploy-to-aws) for the scripted path, source configuration and initialization order. The [deployment status](../README.md#deployment-status) records the last observed cloud state; local validation and functional cloud verification are separate. For the OneDegree event, first follow [Workshop Studio login](workshop-aws.md); use the workshop profile, us-west-2, the $500 account cap and the organizer's service/security rules.
 
-## 2. Deploy
-Push to `main` (or run the *deploy* workflow). It: runs tests → creates ECR → builds and pushes the image tagged with the commit SHA → applies Terraform with that tag → waits for the ECS service to be stable → calls `/api/health`.
+## One-time OIDC/state bootstrap
 
-Manual equivalent:
+`infra/bootstrap` provisions an encrypted/versioned/private Terraform state bucket and a deploy role trusting only `repo:alina-cheng/resource_engine:environment:production` via GitHub OIDC. It reuses an existing OIDC provider by default; set create_github_oidc=true only when the account has none and creation is permitted. Bootstrap state is local and ignored by Git; preserve it securely outside an expiring account.
+
 ```bash
-cd infra/terraform
-terraform init -backend-config="bucket=<state-bucket>" -backend-config="key=resource-engine.tfstate" -backend-config="region=us-west-2"
-terraform apply -target=aws_ecr_repository.app -var image_tag=bootstrap
-docker build -t $(terraform output -raw ecr_repository_url):v1 ../.. && docker push $(terraform output -raw ecr_repository_url):v1
-terraform apply -var image_tag=v1
+export AWS_PROFILE=workshop
+export AWS_REGION=us-west-2
+aws sts get-caller-identity
+terraform -chdir=infra/bootstrap init
+terraform -chdir=infra/bootstrap plan -out=bootstrap.tfplan -var=create_github_oidc=true
+# Inspect the plan and actual IAM permissions before applying.
+terraform -chdir=infra/bootstrap apply bootstrap.tfplan
+terraform -chdir=infra/bootstrap output
 ```
 
-## 3. First-run tasks
-- Create the first admin: `aws cognito-idp admin-create-user --user-pool-id <id> --username you@org --user-attributes Name=email,Value=you@org Name=email_verified,Value=true` then `admin-add-user-to-group --group-name admin`.
-- `config/sources.json` reads ODRS from the live API and NDP from the two files in `data/samples`. Store the ODRS key in Secrets Manager, add it to the task definition `secrets` as `ODRS_API_KEY`, and allow the execution role to read it (not yet in Terraform).
-- Run the first import: admin UI → Imports, or `aws ecs run-task ... --overrides` with `python -m app.jobs.run import`. Then run maintenance.
-- Replace the vendored HSDS schema subset with the official files before go-live (`make schemas`, commit the result).
+Configure GitHub secret `AWS_DEPLOY_ROLE_ARN` from deploy_role_arn, variables `TF_STATE_BUCKET`, `AWS_REGION`, `BEDROCK_MODEL_ID`, and an Environment named production. Restrict deployment branches/reviewers through the repository administrator. If workshop IAM denies OIDC/role creation, record the denied action and use authorized operator-run temporary credentials for this event; do not attempt to change organizer guardrails.
 
-## 4. Operate
-- Logs: CloudWatch `/ecs/resource-engine`. Runs: Admin → Imports and Overview.
-- Schedules: EventBridge Scheduler `resource-engine-import` (04:00 Pacific) and `-maintenance`, adjustable through Terraform variables.
-- Rollback: the ECS circuit breaker rolls back failed deployments; to roll back manually, apply Terraform with an earlier `image_tag`.
-- Backups: Aurora automated backups (7 days) and S3 versioning.
+The bootstrap deployment policy is a sandbox starting point covering this stack, with project-prefixed IAM role/pass-role access. Review/tighten service scopes for a durable account. It does not grant the participant a way around organization/session guardrails.
 
-## 5. Cost notes
-No NAT gateway, one Fargate task, Aurora at 0.5 ACU minimum, scheduled jobs as short Fargate tasks, in-process search. The largest variable costs are Bedrock tokens (bounded by page-hash skipping and the self-sized maintenance batch -- `MAINTENANCE_RECHECK_DAYS` / `MAINTENANCE_SAFETY_FACTOR`, with an optional `MAINTENANCE_MAX_BATCH` ceiling; see ADR-11), the ALB and Aurora. Enable OpenSearch only when in-process search stops being enough.
+## Account and source configuration
+
+- Confirm Aurora PostgreSQL engine/version availability, Fargate capacity, and an accessible Bedrock model/inference profile in us-west-2. `bedrock_model_id` deliberately has no default; task planning rejects Bedrock without a configured model.
+- Copy infra/terraform/workshop.tfvars.example to workshop.tfvars (ignored), fill the actual model and supplied HTTPS mocked/live ODRS/NDP URLs. Those endpoints use the existing adapters and preserve raw responses.
+- Source credentials stay in existing Secrets Manager secrets. Map `ODRS_API_KEY` for the configured ODRS API, or the configured bearer environment name for a bearer-authenticated feed, through `source_token_secret_arns`; values never enter Terraform variables/state. ECS execution-role access is extended to those ARNs.
+- Outside local mode source globs are disabled unless explicitly allowed for synthetic demonstrations. Do not describe generated samples or mocked APIs as a live One Degree feed.
+- The repository now defaults to the configured ODRS HTTPS API (one page of 25) and local NDP sample files. The NDP file glob still requires a hosted HTTPS feed or an explicit synthetic-demo override on AWS. `config/sources.demo.json` selects generated files for local demos. JSON upload is available in the admin Imports page; it uses the same schema/quarantine pipeline.
+- `schedules_enabled` defaults false; enable only after source/model validation. `workshop_mode=true` permits RDS teardown without a final snapshot/deletion protection; durable production defaults retain protection.
+- Set certificate_arn for ACM HTTPS before sending login credentials through the public load balancer. Domain/certificate ownership and DNS are not created automatically.
+
+## Build and deploy
+
+```bash
+terraform -chdir=infra/terraform init -backend-config="bucket=<state-bucket>" -backend-config="key=resource-engine.tfstate" -backend-config="region=us-west-2"
+terraform -chdir=infra/terraform apply -target=aws_ecr_repository.app -var-file=workshop.tfvars -var=image_tag=bootstrap
+```
+
+Log Docker into ECR with aws ecr get-login-password; the password goes directly to docker login --password-stdin and must never be logged. Build/tag/push from this repo. On Apple Silicon select `docker buildx build --platform linux/amd64` because the ECS task defaults to X86_64; alternatively explicitly configure a matching ARM64 runtime platform. Tag the image with the exact source commit SHA. Then plan with that tag and inspect changes before apply:
+
+```bash
+terraform -chdir=infra/terraform plan -var-file=workshop.tfvars -var="image_tag=<commit-sha>" -out=deployment.tfplan
+terraform -chdir=infra/terraform apply deployment.tfplan
+```
+
+The GitHub deploy workflow runs tests, assumes the OIDC role, bootstraps ECR, builds/pushes the image, applies Terraform and checks service health. Repository variables must supply the chosen model/source settings before an automated production deployment.
+
+## End-to-end validation
+
+1. Check /api/health shows postgres, expected auth/blob/model backends and the official HSDS validator. This endpoint reports composition, so also perform actual reads/writes.
+2. Run a small import through a one-off ECS task (`python -m app.jobs.run import`) or through the admin UI after creating an administrator. Every enabled source needs a configured HTTPS endpoint. For generated-file demonstrations, explicitly add `ALLOW_SAMPLE_SOURCES=true` to the one-off container environment; this does not change subsequent web/scheduled tasks. Inspect source-record/object balance, partial sources, held objects and preserved raw bytes. Verify stored and nested API data against official schemas.
+3. For synthetic data containing the demo organizations, run `make demo-accounts` locally to create the login page accounts (admin@demo.org, provider1@demo.org, ana@demo.org) with permanent passwords. The provider requires the imported Bay Area Diaper Bank organization. Set `APP_URL` to the application's HTTPS URL. Alternatively, `python -m app.jobs.run seed-demo --limit 5` as a one-off ECS task adds demo logins, requests, reports and policy documents. It creates no API keys outside local mode; a real-model maintenance pass requires an explicit limit. Use the same source configuration/overrides as the import task if the store is empty. Demo credentials are public: keep this path on synthetic data and disable the accounts when the demo ends. For a private admin instead, use admin-create-user with Name=email_verified,Value=true, then admin-add-user-to-group before the first login. Check all three personas and provider-to-organization links.
+4. Run a limited maintenance check with real Bedrock. A quote-grounded proposal must stay pending until an admin approves; check resulting resource version and actor/approver history.
+5. Start jobs through the admin UI and verify a job ID/task ARN/status. CLI executes persisted parameters; ECS launch failures and application errors must end in failed status, not a false “started” result.
+6. Verify S3 document/raw readback, reconnect/restart persistence, and an HSDS API key. Keep OpenSearch disabled until its remaining limitations are resolved.
+
+## Operate and preserve
+
+Logs: /ecs/resource-engine; status/history: admin console and database job/run tables. EventBridge uses UTC cron expressions; fixed UTC times do not equal one Pacific wall-clock time all year. Aurora backups and S3 versioning reside inside the account, so a workshop cleanup can remove them as well. Export required demo data, source/lock files and deployment evidence outside the event account before it ends. Never commit database dumps or Terraform state/plans.
+
+Secrets injected into ECS are read when a task starts. Rotation requires a new task/deployment to refresh the environment ([AWS documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-secrets-manager.html)). Confirm model activation/access using the current [Bedrock account requirements](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).

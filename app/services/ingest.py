@@ -11,16 +11,17 @@ from app.adapters.base import MappingError, SourceConfig
 from app.adapters.registry import build_adapter
 from app.db import Database, dumps, new_id, now_iso
 from app.services.proposals import ChangeRequests
-from app.services.store import HsdsStore, ValidationFailed
+from app.services.store import Conflict, HsdsStore, ValidationFailed
 
 
 class IngestService:
     def __init__(self, settings, db: Database, store: HsdsStore, blob, proposals: ChangeRequests):
         self.settings, self.db, self.store, self.blob, self.proposals = settings, db, store, blob, proposals
 
-    def _preserve_public_ids(self, mapped, source):
+    def _preserve_public_ids(self, mapped, source, previous=None):
         """Reuse pre-integration public IDs when their source-native identity is known."""
-        previous = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (source,))
+        if previous is None:
+            previous = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (source,))
         identities = {}
         links = {}
         for row in previous:
@@ -33,7 +34,7 @@ class IngestService:
                 links[(data.get("service_id"), data.get("location_id"))] = row["id"]
         aliases = {}
         for resource in mapped.resources:
-            native = resource.data.get("x_resource_engine", {}).get("source", {}).get("record_id")
+            native = ((resource.data.get("x_resource_engine") or {}).get("source") or {}).get("record_id")
             existing = identities.get((resource.type, str(native))) if native is not None else None
             if existing:
                 aliases[resource.id] = existing
@@ -66,15 +67,16 @@ class IngestService:
                   "shared_disagreements": 0, "partial_records": 0, "objects_received": 0,
                   "objects_stored": 0, "objects_quarantined": 0}
         seen: dict[str, str] = {}   # resource id -> hash of first version seen in this run
+        previous_ids = self.db.q("SELECT id,type,data FROM resource WHERE source=? AND deleted=0", (cfg.name,))
         status, error = "completed", None
         try:
             for batch in adapter.fetch(since):
-                key = self.blob.put(f"raw/{cfg.name}/{started}/{batch.batch_id}", batch.raw)   # as received (R1.3)
+                key = self.blob.put(f"raw/{cfg.name}/{run_id}/{batch.batch_id}", batch.raw)   # as received (R1.3)
                 self.db.run("INSERT INTO raw_payload (id,source,native_id,fetched_at,blob_key,run_id) VALUES (?,?,?,?,?,?)",
                             (new_id(), cfg.name, batch.batch_id, started, key, run_id))
                 for rec in batch.records:
                     counts["received"] += 1
-                    self._one(adapter, cfg, rec, started, run_id, counts, seen)
+                    self._one(adapter, cfg, rec, started, run_id, counts, seen, previous_ids)
         except Exception as e:  # noqa: BLE001 - fetch-level failure; counts so far remain truthful
             status, error = "failed", f"{type(e).__name__}: {e}"
         balanced = counts["received"] == counts["stored"] + counts["quarantined"]
@@ -87,13 +89,13 @@ class IngestService:
                      dumps({"error": error, **counts}), run_id))
         return {"run_id": run_id, "source": cfg.name, "status": status, "error": error, **counts}
 
-    def _one(self, adapter, cfg, rec, fetched_at, run_id, counts, seen) -> None:
+    def _one(self, adapter, cfg, rec, fetched_at, run_id, counts, seen, previous_ids=None) -> None:
         nid = "?"
         mapped = None
         try:
             nid = adapter.native_id(rec)
             mapped = adapter.map(rec)
-            self._preserve_public_ids(mapped, cfg.name)
+            self._preserve_public_ids(mapped, cfg.name, previous_ids)
             if not mapped.resources:
                 raise MappingError("No valid top-level HSDS objects remain; " + "; ".join(
                     f"{kind}: {', '.join(reasons)}" for kind, _, reasons in mapped.quarantined_objects))
@@ -137,7 +139,7 @@ class IngestService:
             counts["clashes"] += sum(len(cl) for _, cl in clashes)
             k = "created" if "created" in actions else "updated" if "updated" in actions else "unchanged"
             counts[k] += 1
-        except (MappingError, ValidationFailed, KeyError, ValueError, TypeError) as e:
+        except (MappingError, ValidationFailed, Conflict, KeyError, ValueError, TypeError) as e:
             counts["quarantined"] += 1
             if mapped is not None:
                 counts["objects_received"] += mapped.objects_received

@@ -18,5 +18,5 @@ resource "aws_opensearch_domain" "this" {
     tls_security_policy = "Policy-Min-TLS-1-2-2019-07"
   }
   access_policies = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { AWS = aws_iam_role.task.arn }, Action = "es:ESHttp*",
-    Resource = "arn:aws:es:${var.region}:${data.aws_caller_identity.me.account_id}:domain/${local.name}/*" }] })
+  Resource = "arn:aws:es:${var.region}:${data.aws_caller_identity.me.account_id}:domain/${local.name}/*" }] })
 }

@@ -69,9 +69,11 @@ class OdrsAdapter(SourceAdapter):
         removed from the returned payload and from error messages (which end up in import_run)."""
         retries = int(self.config.options.get("retries", 3))
         params = {**params, **({"api_key": key} if key else {})}
+        bearer_env = self.config.options.get("bearer_env")
+        auth = {"headers": {"Authorization": f"Bearer {os.environ[bearer_env]}"}} if bearer_env and os.environ.get(bearer_env) else {}
         for attempt in range(retries + 1):
             try:
-                r = requests.get(url, params=params, timeout=120)
+                r = requests.get(url, params=params, timeout=120, **auth)
                 r.raise_for_status()
                 break
             except requests.RequestException as e:
