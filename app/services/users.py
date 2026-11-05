@@ -192,6 +192,17 @@ class CognitoAuth:  # pragma: no cover - needs AWS
                                                    {"Name": "email_verified", "Value": "true"}])
         self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName=role)
 
+    def ensure_demo_login(self, email: str, name: str, role: str, password: str) -> None:
+        """Create or reset a demo login with a permanent password. Demo addresses are not ours, so no email is sent."""
+        try:
+            self.idp.admin_create_user(UserPoolId=self.s.cognito_user_pool_id, Username=email, MessageAction="SUPPRESS",
+                                       UserAttributes=[{"Name": "email", "Value": email}, {"Name": "name", "Value": name},
+                                                       {"Name": "email_verified", "Value": "true"}])
+        except self.idp.exceptions.UsernameExistsException:
+            pass
+        self.idp.admin_add_user_to_group(UserPoolId=self.s.cognito_user_pool_id, Username=email, GroupName=role)
+        self.idp.admin_set_user_password(UserPoolId=self.s.cognito_user_pool_id, Username=email, Password=password, Permanent=True)
+
     def verify(self, token: str) -> Principal:
         try:
             key = self.jwks.get_signing_key_from_jwt(token).key

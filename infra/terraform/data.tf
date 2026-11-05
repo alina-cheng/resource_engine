@@ -73,7 +73,7 @@ resource "aws_cognito_user_pool" "this" {
     minimum_length    = 10
     require_lowercase = true
     require_numbers   = true
-    require_uppercase = true
+    require_uppercase = false # the demo passwords on the login page have no uppercase letter
     require_symbols   = false
   }
   mfa_configuration = "OPTIONAL"

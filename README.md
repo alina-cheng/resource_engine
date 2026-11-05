@@ -9,6 +9,14 @@ make demo            # http://127.0.0.1:8000
 ```
 Or `docker compose up --build`. Demo accounts and a guided tour: [docs/local-run.md](docs/local-run.md).
 
+## Deploy to the workshop AWS account
+```bash
+uv run python scripts/configure_workshop_profile.py
+export AWS_PROFILE=workshop AWS_REGION=us-west-2
+DEPLOY_ALLOW_DIRTY=1 make deploy
+```
+Run from the repository root with a filled-in `infra/terraform/workshop.tfvars`. The first command asks for the temporary credentials from the event dashboard. The deploy stops twice for you to type `yes`. More detail: [docs/deployment.md](docs/deployment.md).
+
 ## What is in here
 | Path | Contents |
 |---|---|

@@ -21,7 +21,7 @@ def main(argv=None) -> int:
     c = build_container()
     if a.job == "seed-demo":
         from tools.sample_data_generator.seed import seed_demo
-        print(json.dumps(seed_demo(c), indent=2))
+        print(json.dumps(seed_demo(c, maintenance_limit=a.limit), indent=2, default=str))
         return 0
     from app.jobs.runner import JobRunner
     runner = JobRunner(c)
