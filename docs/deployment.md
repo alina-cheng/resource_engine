@@ -2,7 +2,7 @@
 
 Source repository: `alina-cheng/resource_engine`. Use only this repository's root as the build context. Do not publish sibling `local_refs` or the original engine. Local development, CI and Docker install the committed uv.lock.
 
-Start with the [README deployment guide](../README.md#deploy-to-aws) for the scripted path, source configuration and initialization order. The [deployment status](../README.md#deployment-status) records the last observed cloud state; local validation and functional cloud verification are separate. For the OneDegree event, first follow [Workshop Studio login](workshop-aws.md); use the workshop profile, us-west-2, the $500 account cap and the organizer's service/security rules.
+Start with the [README deployment guide](../README.md#deploy-to-aws) for the scripted path, source configuration and initialization order. The [project status](../README.md#project-status) records the last observed cloud state; local validation and functional cloud verification are separate. For the OneDegree event, first follow [Workshop Studio login](workshop-aws.md); use the workshop profile, us-west-2, the $500 account cap and the organizer's service/security rules.
 
 ## One-time OIDC/state bootstrap
 
