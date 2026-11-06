@@ -34,6 +34,19 @@ export async function api(path, { method = "GET", body, form } = {}) {
   return data;
 }
 
+export async function job(path, body = {}, onProgress) {
+  const result = await api(path, { method: "POST", body });
+  if (!result.job_id || result.finished) return result;
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const status = await api(`/admin/jobs/${result.job_id}`);
+    if (onProgress) onProgress(status);
+    if (status.status === "failed") throw new Error(status.error || "The job failed.");
+    if (status.status === "completed") return status.result;
+  }
+  throw new Error("This job is still running. Check its status in the admin console.");
+}
+
 let toastTimer;
 export function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");

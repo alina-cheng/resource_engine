@@ -1,6 +1,7 @@
 var/
 data/generated/
 __pycache__/
+.DS_Store
 *.pyc
 .env
 .venv/
@@ -8,3 +9,15 @@ __pycache__/
 *.tfstate*
 *.tfplan
 .pytest_cache/
+.env.*
+!.env.example
+*.tfvars
+!*.tfvars.example
+*.dump
+*.backup
+crash.log
+local_refs/
+onedegree_resource_engine/
+
+# API check run artifact (regenerated)
+reports/api_check_results.json

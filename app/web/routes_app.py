@@ -47,6 +47,14 @@ def login():
     return jsonify(container().auth.login(b.get("email", ""), b.get("password", "")))
 
 
+@bp.post("/auth/challenge")
+def login_challenge():
+    auth, b = container().auth, body()
+    if auth.mode != "cognito":
+        return err(400, "This login method does not use challenges.")
+    return jsonify(auth.respond_challenge(b.get("challenge_token", ""), b.get("answer", ""), b.get("attributes")))
+
+
 @bp.post("/auth/register")
 def register():
     b = body()
@@ -264,12 +272,22 @@ def _enrich_crs(crs: list[dict]) -> list[dict]:
 @auth_required("admin")
 def admin_stats():
     c = container()
-    cats = {r["category"]: r["n"] for r in c.db.q("SELECT category, COUNT(*) AS n FROM check_result GROUP BY category")}
+    cats = {r["category"]: r["n"] for r in c.db.q(
+        "SELECT c.category, COUNT(*) AS n FROM check_result c JOIN resource r ON r.id=c.resource_id "
+        "WHERE r.type='service' AND r.deleted=0 GROUP BY c.category")}
     total_services = c.store.counts().get("service", 0)
     cats["unchecked"] = max(0, total_services - sum(cats.values()))
+    stale = c.db.one("SELECT COUNT(*) AS n FROM check_result c JOIN resource r ON r.id=c.resource_id "
+                     "WHERE r.type='service' AND r.deleted=0 AND (c.record_version IS NULL OR c.record_version<>r.version)")["n"]
+    active_job = c.db.one("SELECT id,status,result FROM job_run WHERE kind='maintenance' AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1")
+    if active_job:
+        active_job["result"] = loads(active_job["result"], {})
     pend = {r["kind"]: r["n"] for r in c.db.q("SELECT kind, COUNT(*) AS n FROM change_request WHERE status='pending' GROUP BY kind")}
     open_reports = c.db.one("SELECT COUNT(*) AS n FROM user_report WHERE status='open'")["n"]
     return jsonify({"counts": c.store.counts(), "check_categories": cats, "pending_by_kind": pend,
+                    "maintenance_coverage": {"total": total_services, "checked": total_services-cats["unchecked"],
+                                             "unchecked": cats["unchecked"], "needs_recheck": stale},
+                    "maintenance_job": active_job,
                     "open_reports": open_reports,
                     "seekers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='seeker'")["n"],
                     "providers": c.db.one("SELECT COUNT(*) AS n FROM users WHERE role='provider'")["n"],
@@ -369,7 +387,8 @@ def admin_record(rid):
 @auth_required("admin")
 def admin_edit(rid):
     c, b = container(), body()
-    res = c.store.apply_patch(rid, b.get("patch") or {}, "admin", g.principal.email, note=b.get("note"))
+    res = c.store.apply_patch(rid, b.get("patch") or {}, "admin", g.principal.email, note=b.get("note"),
+                              expected_version=b.get("expected_version"))
     return jsonify(res)
 
 
@@ -402,6 +421,15 @@ def admin_maint_run():
     scope = "service" if b.get("service_id") else "all"
     return jsonify(container().jobs.start("maintenance", wait=bool(b.get("wait")) or request.args.get("wait") == "true", scope=scope,
                                           service_id=b.get("service_id"), force=bool(b.get("force")), limit=b.get("limit"), who=g.principal.email))
+
+
+@bp.get("/admin/jobs/<jid>")
+@auth_required("admin")
+def admin_job(jid):
+    row = container().jobs.get(jid)
+    if not row:
+        raise KeyError(jid)
+    return jsonify(row)
 
 
 @bp.get("/admin/maintenance/results")
@@ -461,6 +489,57 @@ def admin_imports():
     return jsonify({"runs": runs, "sources": [{"name": s.name, "adapter": s.adapter, "location": s.location, "enabled": s.enabled} for s in c.sources()]})
 
 
+@bp.post("/admin/imports/upload")
+@auth_required("admin")
+def admin_import_upload():
+    """Import an uploaded source file through the normal ingest pipeline instead of the configured
+    location. The uploaded JSON is written to a temporary file and fed to the matching adapter, so
+    mapping, validation, raw-payload storage and quarantine behave exactly like a scheduled import."""
+    import os
+    import tempfile
+
+    from app.adapters.base import SourceConfig
+    from app.adapters.registry import ADAPTERS
+
+    c = container()
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return err(400, "Choose a JSON file to upload.")
+    # Reuse an existing source's name/adapter so ids, x_resource_engine.source and clash handling
+    # match previously imported records. Defaults to the NDP adapter.
+    source = (request.form.get("source") or "ndp").strip()
+    cfg = next((s for s in c.sources() if s.name == source), None)
+    adapter_kind = cfg.adapter if cfg else source
+    if adapter_kind not in ADAPTERS:
+        return err(400, f"No adapter is registered for '{adapter_kind}'.")
+
+    data = f.read()
+    try:
+        json.loads(data)
+    except (ValueError, UnicodeDecodeError):
+        return err(400, "That file is not valid JSON.")
+
+    tmp = tempfile.NamedTemporaryFile(prefix=f"upload-{source}-", suffix=".json", delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        upload_cfg = SourceConfig(name=source, adapter=adapter_kind, location=tmp.name, enabled=True,
+                                  options=(cfg.options if cfg else {}))
+        result = c.ingest.run(upload_cfg, trigger="upload", initiated_by=g.principal.email)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    if c.settings.auto_maintenance_after_import and result.get("status") == "completed" and result.get("received", 0):
+        from app.jobs.runner import JobError
+        try:
+            result["maintenance_job"] = c.jobs.enqueue_maintenance("upload:" + g.principal.email)
+        except JobError as error:
+            result["maintenance_error"] = str(error)
+    return jsonify({**result, "filename": f.filename}), 201
+
+
 @bp.get("/admin/quarantine")
 @auth_required("admin")
 def admin_quarantine():
@@ -509,8 +588,11 @@ def admin_user_create():
     if b["role"] == "provider" and not c.store.get(b.get("org_id") or ""):
         return err(400, "Choose the organization this provider account belongs to.")
     if c.settings.auth_mode == "cognito":  # pragma: no cover
-        c.auth.create_provider_login(b["email"], b["name"])
-    u = c.users.create(b["email"], b["name"], b["role"], b.get("password"), b.get("org_id"))
+        if c.users.by_email(b["email"]):
+            return err(400, "An account with that email already exists.")
+        c.auth.create_provider_login(b["email"], b["name"], b["role"], b.get("password"))
+    u = c.users.create(b["email"], b["name"], b["role"],
+                       b.get("password") if c.settings.auth_mode == "local" else None, b.get("org_id"))
     return jsonify(u), 201
 
 
@@ -540,4 +622,4 @@ def admin_doc_decide(did):
 @bp.post("/admin/reindex")
 @auth_required("admin")
 def admin_reindex():
-    return jsonify(container().search.reindex())
+    return jsonify(container().jobs.start("reindex"))

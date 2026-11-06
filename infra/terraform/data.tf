@@ -10,11 +10,11 @@ resource "aws_rds_cluster" "this" {
   engine_version              = var.db_engine_version
   database_name               = "resource_engine"
   master_username             = "resource_engine"
-  manage_master_user_password = true            # password lives in Secrets Manager, rotated by RDS
+  manage_master_user_password = true # password lives in Secrets Manager, rotated by RDS
   storage_encrypted           = true
   backup_retention_period     = 7
-  deletion_protection         = true
-  skip_final_snapshot         = false
+  deletion_protection         = !var.workshop_mode
+  skip_final_snapshot         = var.workshop_mode
   final_snapshot_identifier   = "${local.name}-final"
   db_subnet_group_name        = aws_db_subnet_group.this.name
   vpc_security_group_ids      = [aws_security_group.db.id]
@@ -40,9 +40,7 @@ resource "aws_s3_bucket_versioning" "data" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "data" {
   bucket = aws_s3_bucket.data.id
   rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
+    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
   }
 }
 resource "aws_s3_bucket_public_access_block" "data" {
@@ -75,7 +73,7 @@ resource "aws_cognito_user_pool" "this" {
     minimum_length    = 10
     require_lowercase = true
     require_numbers   = true
-    require_uppercase = true
+    require_uppercase = false # the demo passwords on the login page have no uppercase letter
     require_symbols   = false
   }
   mfa_configuration = "OPTIONAL"

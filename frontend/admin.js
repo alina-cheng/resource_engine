@@ -1,5 +1,5 @@
 // One Degree admin console: overview, review queue, records, providers, seekers, imports, documents, API keys.
-import { h, api, toast, modal, closeModal, badge, errBox, fmtDate, fmtDay, empty, table, params, qs, pager, diff, LABEL } from "./ui.js";
+import { h, api, job, toast, modal, closeModal, badge, errBox, fmtDate, fmtDay, empty, table, params, qs, pager, diff, LABEL } from "./ui.js";
 import { recordEditor } from "./records.js";
 
 const CATS = ["actively_bad", "check_failed", "discrepancy", "missing_information", "verified", "unchecked"];
@@ -14,27 +14,32 @@ export function admin(page, need) {
     const s = await api("/admin/stats");
     const total = Object.values(s.check_categories).reduce((a, b) => a + b, 0) || 1;
     const pend = Object.values(s.pending_by_kind).reduce((a, b) => a + b, 0);
-    const act = (label, kind, body) => h("button", { class: "ghost", onclick: async (e) => {
-      e.target.disabled = true; try { await api(kind, { method: "POST", body: { ...body, wait: true } }); toast(`${label} finished.`); refresh(); } catch (x) { toast(x.message); e.target.disabled = false; } } }, label);
+    const act = (label, kind, body) => h("button", { class: "ghost", disabled: kind === "/admin/maintenance/run" && !!s.maintenance_job, onclick: async (e) => {
+      e.target.disabled = true; try { await job(kind, body, (status) => {
+        const p = status.result || {}; e.target.textContent = p.target != null ? `Checking ${p.checked || 0} / ${p.target}` : `${label}: ${status.status}`;
+      }); toast(`${label} finished.`); refresh(); } catch (x) { toast(x.message); e.target.disabled = false; e.target.textContent = label; } } }, label);
     show(h("div", { class: "row spread" }, h("h1", null, "Overview"),
-      h("div", { class: "row" }, act("Import all sources", "/admin/imports/run", {}), act("Check due records", "/admin/maintenance/run", {}), act("Rebuild search index", "/admin/reindex", {}))),
+      h("div", { class: "row" }, act("Import all sources", "/admin/imports/run", {}), act(`Check all ${s.counts.service || 0} records`, "/admin/maintenance/run", { force: true, limit: s.counts.service || 0 }), act("Check all due records", "/admin/maintenance/run", {}), act("Rebuild search index", "/admin/reindex", {}))),
       h("div", { class: "grid cols-3" },
         h("a", { class: "card stat", href: "#/admin/review" }, h("b", null, pend), "changes waiting for review", h("div", { class: "muted small" }, Object.entries(s.pending_by_kind).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(" · "))),
         h("a", { class: "card stat", href: "#/admin/records" }, h("b", null, s.counts.service || 0), "services", h("div", { class: "muted small" }, `${s.counts.organization || 0} organizations · ${s.counts.location || 0} locations`)),
         h("a", { class: "card stat", href: "#/admin/seekers" }, h("b", null, s.open_requests), "open help requests", h("div", { class: "muted small" }, `${s.seekers} help seekers · ${s.providers} provider accounts`)),
-        h("a", { class: "card stat", href: "#/admin/imports" }, h("b", null, s.quarantined), "quarantined source records", h("div", { class: "muted small" }, "could not be converted to valid HSDS")),
+        h("a", { class: "card stat", href: "#/admin/imports" }, h("b", null, s.quarantined), "quarantined items", h("div", { class: "muted small" }, "invalid objects or unmappable source records")),
         h("a", { class: "card stat", href: "#/admin/documents?status=pending" }, h("b", null, s.docs_pending), "documents waiting for approval"),
         h("a", { class: "card stat", href: "#/admin/reports" }, h("b", null, s.open_reports || 0), "user reports to review", h("div", { class: "muted small" }, "listings a person flagged as wrong"))),
       h("h2", { style: "margin-top:1.5rem" }, "Record health"),
+      h("p", { class: "muted small" }, `${s.maintenance_coverage?.checked || 0} / ${s.maintenance_coverage?.total || 0} records checked · ${s.maintenance_coverage?.unchecked || 0} awaiting first check · ${s.maintenance_coverage?.needs_recheck || 0} changed since their check.`),
+      s.maintenance_job ? h("p", { role: "status" }, `Maintenance ${s.maintenance_job.status}: ${s.maintenance_job.result?.checked || 0} / ${s.maintenance_job.result?.target ?? "…"} processed. Updates automatically.`) : null,
       h("div", { class: "card" }, h("div", { class: "bars" }, CATS.map((c) => h("a", { class: "bar-row", href: `#/admin/records${qs({ category: c })}` }, badge(c),
         h("div", { class: "bar-track" }, h("div", { class: "bar-fill", style: `width:${((s.check_categories[c] || 0) / total) * 100}%` }), ), h("span", null, s.check_categories[c] || 0))))),
       h("h2", { style: "margin-top:1.5rem" }, "Latest imports"), importRuns(s.last_imports),
       h("h2", { style: "margin-top:1.5rem" }, "Latest maintenance runs"),
       table(["Started", "Scope", "Trigger", "Status", "Result"], s.last_maintenance.map((r) => [fmtDate(r.started_at), r.scope, `${r.trigger} · ${r.initiated_by}`, badge(r.status), countsLine(JSON.parse(r.counts || "{}"))]), "No maintenance runs yet."));
+    if (s.maintenance_job) setTimeout(() => { if (location.hash.replace(/\/$/, "") === "#/admin") refresh(); }, 5000);
   }
-  const countsLine = (c) => ["actively_bad", "check_failed", "discrepancy", "missing_information", "verified"].filter((k) => c[k]).map((k) => `${c[k]} ${LABEL[k].toLowerCase()}`).join(", ") || "—";
-  const importRuns = (runs) => table(["Started", "Source", "Received", "Stored", "Quarantined", "Clashes", "Balanced", "Status"],
-    runs.map((r) => [fmtDate(r.started_at), r.source, r.received, r.stored, r.quarantined, r.clashes, r.status === "running" ? "…" : r.received === r.stored + r.quarantined ? "Yes" : "No", badge(r.status)]), "No imports yet.");
+  const countsLine = (c) => (c.target != null ? `${c.checked || 0}/${c.target} processed · ` : "") + (["actively_bad", "check_failed", "discrepancy", "missing_information", "verified"].filter((k) => c[k]).map((k) => `${c[k]} ${LABEL[k].toLowerCase()}`).join(", ") || "—");
+  const importRuns = (runs) => table(["Started", "Source", "Received records", "Imported records", "Held records", "Partial records", "Held objects", "Clashes", "Balanced", "Status"],
+    runs.map((r) => { const d = JSON.parse(r.detail || "{}"); return [fmtDate(r.started_at), r.source, r.received, r.stored, r.quarantined, d.partial_records || 0, d.objects_quarantined || 0, r.clashes, r.status === "running" ? "…" : r.received === r.stored + r.quarantined ? "Yes" : "No", badge(r.status)]; }), "No imports yet.");
 
   async function review() {
     const p = params(), kind = p.kind || "", status = p.status || "pending";
@@ -67,7 +72,7 @@ export function admin(page, need) {
     const d = await api(`/admin/maintenance/results${qs({ category: p.category, q: p.q, source: p.source, page: pg, per_page: 25 })}`);
     const q = h("input", { value: p.q || "", placeholder: "Search by name…", "aria-label": "Search records", style: "max-width:260px" });
     const go = (o) => (location.hash = `#/admin/records${qs({ ...p, ...o })}`);
-    show(h("div", { class: "row spread" }, h("h1", null, "Records"), h("button", { class: "ghost", onclick: async (e) => { e.target.disabled = true; await api("/admin/maintenance/run", { method: "POST", body: { wait: true } }); toast("Check finished."); refresh(); } }, "Check due records now")),
+    show(h("div", { class: "row spread" }, h("h1", null, "Records"), h("button", { class: "ghost", onclick: async (e) => { e.target.disabled = true; try { await job("/admin/maintenance/run", {}, (status) => { const p = status.result || {}; e.target.textContent = p.target != null ? `Checking ${p.checked || 0} / ${p.target}` : status.status; }); toast("Check finished."); refresh(); } catch (error) { toast(error.message); e.target.disabled = false; } } }, "Check all due records now")),
       h("div", { class: "row" }, h("select", { style: "width:auto", "aria-label": "Category", onchange: (e) => go({ category: e.target.value, page: 1 }) },
         h("option", { value: "" }, "All categories"), CATS.map((c) => h("option", { value: c, selected: p.category === c ? true : null }, LABEL[c]))),
         h("select", { style: "width:auto", "aria-label": "Source", onchange: (e) => go({ source: e.target.value, page: 1 }) }, h("option", { value: "" }, "All sources"), ["odrs", "ndp"].map((s) => h("option", { value: s, selected: p.source === s ? true : null }, s))),
@@ -77,7 +82,7 @@ export function admin(page, need) {
         h("div", null, badge(r.category), (r.flags || []).includes("user_reported") && badge("user_reported"), r.summary && h("div", { class: "muted small" }, r.summary),
           r.reports ? h("div", { class: "muted small" }, `${r.reports} open user report${r.reports > 1 ? "s" : ""}`) : null),
         fmtDate(r.checked_at), r.pending || "—", h("div", { class: "row" }, h("a", { class: "btn ghost sm", href: `#/admin/record/${r.id}` }, "Open"),
-          h("button", { class: "ghost sm", onclick: async (e) => { e.target.disabled = true; await api("/admin/maintenance/run", { method: "POST", body: { service_id: r.id, wait: true } }); toast("Checked."); refresh(); } }, "Check now"))]),
+          h("button", { class: "ghost sm", onclick: async (e) => { e.target.disabled = true; await job("/admin/maintenance/run", { service_id: r.id }); toast("Checked."); refresh(); } }, "Check now"))]),
         "No records match these filters.")), pager(d.total, pg, 25, (n) => go({ page: n })));
   }
 
@@ -134,10 +139,33 @@ export function admin(page, need) {
 
   async function imports() {
     const d = await api("/admin/imports"), q = await api("/admin/quarantine");
-    const run = (source) => async (e) => { e.target.disabled = true; try { await api("/admin/imports/run", { method: "POST", body: { source, wait: true } }); toast("Import finished."); } catch (x) { toast(x.message); } refresh(); };
+    const run = (source) => async (e) => { e.target.disabled = true; try { await job("/admin/imports/run", { source }); toast("Import finished."); } catch (x) { toast(x.message); } refresh(); };
+    // Upload a source file and run it through the normal ingest pipeline (reuses the source's adapter).
+    const file = h("input", { type: "file", accept: ".json,application/json" });
+    const source = h("select", null, d.sources.map((s) => h("option", { value: s.name }, `${s.name} (${s.adapter})`)));
+    const ndp = d.sources.find((s) => s.adapter === "ndp" || s.name === "ndp");
+    if (ndp) source.value = ndp.name;
+    const upOut = h("div");
+    const upload = async (e) => {
+      upOut.replaceChildren();
+      if (!file.files[0]) { upOut.append(errBox(new Error("Choose a JSON file first."))); return; }
+      const fd = new FormData(); fd.append("file", file.files[0]); fd.append("source", source.value);
+      e.target.disabled = true;
+      try {
+        const r = await api("/admin/imports/upload", { method: "POST", form: fd });
+        toast(`Imported ${r.filename}: ${r.stored} stored (${r.partial_records || 0} partial), ${r.quarantined} held; ${r.objects_quarantined || 0} invalid objects.`);
+        refresh();
+      } catch (x) { upOut.append(errBox(x)); e.target.disabled = false; }
+    };
     show(h("div", { class: "row spread" }, h("h1", null, "Imports"), h("button", { onclick: run() }, "Import all sources now")),
-      h("h2", null, "Sources"), table(["Name", "Adapter", "Location", ""], d.sources.map((s) => [s.name, s.adapter, h("span", { class: "mono" }, s.location), h("button", { class: "ghost sm", onclick: run(s.name) }, "Import now")])),
-      h("h2", { style: "margin-top:1.5rem" }, "Runs"), h("p", { class: "muted small" }, "Every run must balance: received = stored + quarantined."), importRuns(d.runs),
+      h("h2", null, "Upload a file"),
+      h("p", { class: "muted small" }, "Import a JSON file for a source instead of its configured location. It runs through the same pipeline (map, validate, store or quarantine). NDP files use the shape ", h("span", { class: "mono" }, '{ "data": [ … ] }'), "."),
+      h("div", { class: "card flat", style: "max-width:560px" }, upOut,
+        h("label", null, "Source"), source,
+        h("label", { style: "margin-top:.6rem" }, "File"), file,
+        h("div", { style: "margin-top:.8rem" }, h("button", { onclick: upload }, "Upload and import"))),
+      h("h2", { style: "margin-top:1.5rem" }, "Sources"), table(["Name", "Adapter", "Location", ""], d.sources.map((s) => [s.name, s.adapter, h("span", { class: "mono" }, s.location), h("button", { class: "ghost sm", onclick: run(s.name) }, "Import now")])),
+      h("h2", { style: "margin-top:1.5rem" }, "Runs"), h("p", { class: "muted small" }, "Valid parts of a listing can be imported while invalid objects are held for review. Record and object counts balance separately."), importRuns(d.runs),
       h("h2", { style: "margin-top:1.5rem" }, "Quarantine"), table(["When", "Source", "Record", "Why it was held back"], q.quarantine.map((r) => [fmtDate(r.created_at), r.source, r.native_id, r.reason]), "Nothing is quarantined."));
   }
 

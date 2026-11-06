@@ -3,19 +3,28 @@ on:
   workflow_dispatch:
   push: { branches: [main] }
 permissions: { id-token: write, contents: read }
+concurrency: { group: resource-engine-production, cancel-in-progress: false }
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
   TF_DIR: infra/terraform
+  TF_VAR_bedrock_model_id: ${{ vars.BEDROCK_MODEL_ID }}
+  TF_VAR_odrs_api_url: ${{ vars.ODRS_API_URL }}
+  TF_VAR_ndp_api_url: ${{ vars.NDP_API_URL }}
+  TF_VAR_workshop_mode: ${{ vars.WORKSHOP_MODE || 'false' }}
+  TF_VAR_schedules_enabled: ${{ vars.SCHEDULES_ENABLED || 'false' }}
+  TF_VAR_source_token_secret_arns: ${{ vars.SOURCE_TOKEN_SECRET_ARNS || '{}' }}
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip }
-      - run: pip install -r requirements-dev.txt && python -m unittest discover -s tests -t .
+      - uses: astral-sh/setup-uv@v5
+        with: { version: "0.13.4", python-version: "3.12", enable-cache: true }
+      - run: uv sync --frozen
+      - run: uv run --frozen pytest -q
   deploy:
     needs: test
+    if: github.event_name == 'workflow_dispatch' || vars.AWS_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production        # add required reviewers in GitHub for a manual gate
     steps:
@@ -26,6 +35,7 @@ jobs:
       - name: Bootstrap ECR (first run creates the repository)
         run: |
           terraform -chdir=$TF_DIR init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=resource-engine.tfstate" -backend-config="region=$AWS_REGION"
+          terraform -chdir=$TF_DIR validate
           terraform -chdir=$TF_DIR apply -auto-approve -target=aws_ecr_repository.app -var="image_tag=bootstrap"
       - uses: aws-actions/amazon-ecr-login@v2
         id: ecr

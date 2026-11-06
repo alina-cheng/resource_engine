@@ -1,0 +1,167 @@
+{
+    "input": {
+        "countAvailable": 5,
+        "countReturned": 5,
+        "lastUpdated": "1970-01-01",
+        "includeInactive": false,
+        "dataOwners": "211demo-quarantine",
+        "skip": 0,
+        "take": 5
+    },
+    "_comment": "Demo source for the Imports page. Two records map cleanly to valid HSDS and are stored; three are deliberately broken so they are quarantined (never dropped, never stored invalid). Each broken record documents the reason it is held back. Expected on import: received 5, stored 2, quarantined 3.",
+    "data": [
+        {
+            "_demo": "VALID - maps cleanly to HSDS and should be STORED.",
+            "id": "211demo-q-10000001",
+            "name": "Lakeside Warming Shelter",
+            "alternateNames": [],
+            "description": "<p>Overnight warming shelter with beds, meals and case management on cold nights.</p>",
+            "url": "http://www.lakeside-warming-shelter.example.org",
+            "email": "intake@lakeside-shelter.example.org",
+            "yearIncorporated": 2009,
+            "taxStatus": "501(c)(3)",
+            "legalStatus": "Nonprofit",
+            "dataOwner": "211demo-quarantine",
+            "phones": [
+                {"id": "q-ph-1", "name": "Phone", "type": "main", "number": "(510) 555-0211", "extension": null, "description": "Intake", "isMain": true}
+            ],
+            "locations": [
+                {
+                    "id": "211demo-q-loc-1",
+                    "idOrganization": "211demo-q-10000001",
+                    "name": "Lakeside main site",
+                    "latitude": 37.8044,
+                    "longitude": -122.2712,
+                    "addresses": [
+                        {"id": "q-addr-1", "type": "physical", "street": "412 Lakeside Drive", "city": "Oakland", "county": "Alameda", "state": "CA", "postalCode": "94612", "country": "United States"}
+                    ],
+                    "phones": [],
+                    "schedules": [
+                        {"id": "q-sch-1", "open": [{"day": "mon", "opensAt": "18:00", "closesAt": "08:00"}, {"day": "tue", "opensAt": "18:00", "closesAt": "08:00"}], "description": ""}
+                    ],
+                    "serviceIds": ["211demo-q-svc-1"]
+                }
+            ],
+            "services": [
+                {
+                    "id": "211demo-q-svc-1",
+                    "idOrganization": "211demo-q-10000001",
+                    "name": "Overnight warming shelter",
+                    "description": "<p>Beds and a hot meal on nights below 40F. No referral needed.</p>",
+                    "url": "http://www.lakeside-warming-shelter.example.org",
+                    "phones": [],
+                    "schedules": [
+                        {"id": "q-sch-2", "open": [{"day": "mon", "opensAt": "18:00", "closesAt": "08:00"}], "description": ""}
+                    ],
+                    "eligibility": {"description": "Adults 18 and over. Open to all during a cold-weather alert.", "types": []},
+                    "documents": {"description": "None", "types": []},
+                    "serviceAreas": [
+                        {"id": "q-sa-1", "type": "county", "value": "Alameda County", "geoComponents": [{"county": "Alameda", "state": "California", "country": "United States"}]}
+                    ],
+                    "locationIds": ["211demo-q-loc-1"],
+                    "meta": {"status": "active", "lastVerified": "2026-09-20", "lastUpdated": "2026-09-20"}
+                }
+            ],
+            "meta": {"status": "active", "lastVerified": "2026-09-20", "lastUpdated": "2026-09-20"}
+        },
+        {
+            "_demo": "VALID - a second clean record so the run is not entirely broken. Should be STORED.",
+            "id": "211demo-q-10000002",
+            "name": "Riverside Free Clinic",
+            "alternateNames": [],
+            "description": "<p>Volunteer-run clinic offering free primary care and basic labs.</p>",
+            "url": "http://www.riverside-free-clinic.example.org",
+            "email": null,
+            "yearIncorporated": 2015,
+            "taxStatus": "501(c)(3)",
+            "legalStatus": "Nonprofit",
+            "dataOwner": "211demo-quarantine",
+            "phones": [
+                {"id": "q-ph-2", "name": "Phone", "type": "main", "number": "(650) 555-0199", "extension": null, "description": "Appointments", "isMain": true}
+            ],
+            "locations": [
+                {
+                    "id": "211demo-q-loc-2",
+                    "idOrganization": "211demo-q-10000002",
+                    "name": "Riverside clinic",
+                    "latitude": 37.4852,
+                    "longitude": -122.2364,
+                    "addresses": [
+                        {"id": "q-addr-2", "type": "physical", "street": "88 Riverside Avenue", "city": "Redwood City", "county": "San Mateo", "state": "CA", "postalCode": "94063", "country": "United States"}
+                    ],
+                    "phones": [],
+                    "schedules": [],
+                    "serviceIds": ["211demo-q-svc-2"]
+                }
+            ],
+            "services": [
+                {
+                    "id": "211demo-q-svc-2",
+                    "idOrganization": "211demo-q-10000002",
+                    "name": "Free primary care clinic",
+                    "description": "<p>Walk-in primary care for uninsured adults, Saturdays.</p>",
+                    "url": "http://www.riverside-free-clinic.example.org",
+                    "phones": [],
+                    "schedules": [
+                        {"id": "q-sch-3", "open": [{"day": "sat", "opensAt": "09:00", "closesAt": "13:00"}], "description": ""}
+                    ],
+                    "eligibility": {"description": "Uninsured adults. No appointment required.", "types": []},
+                    "documents": {"description": "Photo ID if available", "types": []},
+                    "serviceAreas": [
+                        {"id": "q-sa-2", "type": "county", "value": "San Mateo County", "geoComponents": [{"county": "San Mateo", "state": "California", "country": "United States"}]}
+                    ],
+                    "locationIds": ["211demo-q-loc-2"],
+                    "meta": {"status": "active", "lastVerified": "2026-08-01", "lastUpdated": "2026-08-01"}
+                }
+            ],
+            "meta": {"status": "active", "lastVerified": "2026-08-01", "lastUpdated": "2026-08-01"}
+        },
+        {
+            "_demo": "QUARANTINE - organization has no name. The NDP adapter raises MappingError('organization has no id/name') before any HSDS object is built. Reason shown in Imports: 'MappingError: organization has no id/name'.",
+            "id": "211demo-q-10000003",
+            "name": "",
+            "description": "<p>This record is missing the organization name, which HSDS requires.</p>",
+            "dataOwner": "211demo-quarantine",
+            "services": [],
+            "meta": {"status": "active"}
+        },
+        {
+            "_demo": "QUARANTINE - organization has no id. native_id() reads record['id']; with it absent that raises KeyError, which the ingest pipeline catches and quarantines. Reason shown in Imports: \"KeyError: 'id'\". The record is held back under native_id '?' so it is still recorded, never dropped.",
+            "name": "Nameless Outreach Project",
+            "description": "<p>This record has no stable id from the source, so it cannot be ingested.</p>",
+            "dataOwner": "211demo-quarantine",
+            "services": [],
+            "meta": {"status": "active"}
+        },
+        {
+            "_demo": "QUARANTINE - valid shape but invalid HSDS data: yearIncorporated must be an integer, here it is a free-text string. The adapter passes it straight through, then HSDS validation fails with 'organization/year_incorporated: expected integer, got str' and the record is quarantined instead of stored invalid.",
+            "id": "211demo-q-10000005",
+            "name": "Harborview Senior Services",
+            "alternateNames": [],
+            "description": "<p>Meals, transport and social activities for older adults.</p>",
+            "url": "http://www.harborview-seniors.example.org",
+            "yearIncorporated": "nineteen eighty-eight",
+            "taxStatus": "501(c)(3)",
+            "legalStatus": "Nonprofit",
+            "dataOwner": "211demo-quarantine",
+            "phones": [
+                {"id": "q-ph-5", "name": "Phone", "type": "main", "number": "(510) 555-0455", "extension": null, "description": "Main", "isMain": true}
+            ],
+            "services": [
+                {
+                    "id": "211demo-q-svc-5",
+                    "idOrganization": "211demo-q-10000005",
+                    "name": "Senior congregate meals",
+                    "description": "<p>Hot lunch weekdays at the senior center.</p>",
+                    "phones": [],
+                    "schedules": [],
+                    "eligibility": {"description": "Adults 60 and over.", "types": []},
+                    "serviceAreas": [],
+                    "locationIds": [],
+                    "meta": {"status": "active", "lastVerified": "2026-07-15", "lastUpdated": "2026-07-15"}
+                }
+            ],
+            "meta": {"status": "active", "lastVerified": "2026-07-15", "lastUpdated": "2026-07-15"}
+        }
+    ]
+}

@@ -34,7 +34,7 @@ from app.maintenance.website_source import WebsiteResult, WebsiteSource
 
 # Change this when extraction or comparison changes enough that earlier results shouldn't be
 # carried forward, so every record is reviewed again.
-REVIEW_VERSION = "1"
+REVIEW_VERSION = "2"
 
 
 class WorkerSetupError(RuntimeError):

@@ -1,9 +1,14 @@
 """ODRS (One Degree legacy API / BayesExport) -> HSDS. Mapping follows technical doc section 4."""
 from __future__ import annotations
+import json
+import os
 import re
-from typing import Any
+import time
+from typing import Any, Iterator
 
-from app.adapters.base import Mapped, MappingError, Resource, SourceAdapter
+import requests
+
+from app.adapters.base import Mapped, MappingError, RawBatch, Resource, SourceAdapter
 from app.adapters.common import (DAY_CODES, TaxonomyBuilder, clean, country_code, html_to_text, norm_time,
                                  phone, split_items, weekly_schedules)
 from app.hsds.ids import make_id
@@ -12,6 +17,7 @@ DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sun
 ELIG_PREFIXES = ("elig-", "community-", "citizenship-", "gender-")
 SKIP_ELIG = {"elig-description", "elig-documentation", "elig-age-or-over", "elig-age-or-under",
              "elig-city-resident", "elig-county-resident"}
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
 def _truthy(v: Any) -> bool:
@@ -29,24 +35,75 @@ class OdrsAdapter(SourceAdapter):
     def native_id(self, record: dict) -> str:
         return str(record["id"])
 
-    def fetch_http(self, url, since):  # pragma: no cover - live API
-        import requests
-        from app.adapters.base import RawBatch
-        headers = {}
-        token = self.config.options.get("bearer_env")
-        if token:
-            import os
-            headers["Authorization"] = f"Bearer {os.environ.get(token, '')}"
+    def fetch_http(self, url, since):
+        """Pulls pages from the ODRS API. `since` is ignored: no change filter is known for this API.
+
+        Pages are counted here because the API's paging.next_page links drop the port and return 401.
+        The `max_pages` option limits the pull. Opportunities omit the organization description, so with
+        the `organizations_url` option each organization is looked up once and its description is added
+        to the record."""
+        options = self.config.options
+        key_env = options.get("api_key_env")
+        key = os.environ.get(key_env, "") if key_env else ""
+        if key_env and not key:
+            raise RuntimeError(f"{key_env} is not set")
+        per_page = int(options.get("per_page", 100))
+        org_url = options.get("organizations_url")
+        descriptions: dict[Any, str | None] = {}
         page = 1
-        while url:
-            r = requests.get(url, headers=headers, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-            yield RawBatch(f"page-{page}", r.content, self.parse_page(data))
-            url = (data.get("paging") or {}).get("next_page")
+        while True:
+            raw, data = self._get_json(url, {"page": page, "per_page": per_page}, key)
+            records = self.parse_page(data)
+            if not records:
+                return
+            if org_url:
+                yield from self._fill_org_descriptions(records, org_url, key, descriptions)
+            yield RawBatch(f"page-{page}", raw, records)
+            last = (data.get("paging") or {}).get("total_pages", page + 1)
+            if page >= min(last, options.get("max_pages", last)):
+                return
             page += 1
 
-    def map(self, opp: dict) -> Mapped:
+    def _get_json(self, url: str, params: dict, key: str) -> tuple[bytes, Any]:
+        """GET with retries. The key travels in the URL and the API echoes it in paging links, so it is
+        removed from the returned payload and from error messages (which end up in import_run)."""
+        retries = int(self.config.options.get("retries", 3))
+        params = {**params, **({"api_key": key} if key else {})}
+        bearer_env = self.config.options.get("bearer_env")
+        auth = {"headers": {"Authorization": f"Bearer {os.environ[bearer_env]}"}} if bearer_env and os.environ.get(bearer_env) else {}
+        for attempt in range(retries + 1):
+            try:
+                r = requests.get(url, params=params, timeout=120, **auth)
+                r.raise_for_status()
+                break
+            except requests.RequestException as e:
+                status = e.response.status_code if e.response is not None else None
+                if attempt == retries or (status is not None and status not in RETRYABLE_STATUS):
+                    raise RuntimeError(str(e).replace(key, "***") if key else str(e)) from None
+                time.sleep(2 ** attempt)
+        raw = r.content.replace(key.encode(), b"***") if key else r.content
+        return raw, json.loads(raw)
+
+    def _fill_org_descriptions(self, records: list[dict], org_url: str, key: str, descriptions: dict) -> Iterator[RawBatch]:
+        """Adds descriptions to `records` and yields each organization response so it is kept as a raw
+        payload. A failed lookup leaves the record to the org_description_policy instead of stopping the run."""
+        for rec in records:
+            org = rec.get("organization") or {}
+            org_id = org.get("id")
+            if not org_id or org.get("description"):
+                continue
+            if org_id not in descriptions:
+                try:
+                    raw, data = self._get_json(f"{org_url}/{org_id}", {}, key)
+                except (RuntimeError, ValueError):
+                    descriptions[org_id] = None
+                    continue
+                descriptions[org_id] = data.get("description")
+                yield RawBatch(f"organization-{org_id}", raw, [])
+            if descriptions[org_id]:
+                org["description"] = descriptions[org_id]
+
+    def _enriched_map(self, opp: dict) -> Mapped:
         src = self.name
         org = opp.get("organization") or {}
         if not org.get("id") or not org.get("name"):
@@ -213,3 +270,8 @@ class OdrsAdapter(SourceAdapter):
                 seen.add((r.type, r.id))
                 uniq.append(r)
         return Mapped(str(opp["id"]), uniq, warnings)
+
+
+    def map(self, record: dict) -> Mapped:
+        from app.adapters.canonical import map_record
+        return map_record(self, record)

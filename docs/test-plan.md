@@ -1,6 +1,6 @@
 # Test plan
 
-Run: `make test` (stdlib `unittest`; `pytest` also discovers the tests). 40 tests, about 12 seconds, no network.
+Run: `uv sync --frozen && make test` (pytest). Current integration: 74 tests passed with PostgreSQL 16 enabled via TEST_DATABASE_URL, including 4 real PostgreSQL checks; without it those 4 tests skip. Original 57 unittest cases remain covered. A fake Cognito/Bedrock response is not a real cloud call.
 
 | Area | File | Covers (requirement) |
 |---|---|---|
@@ -19,7 +19,9 @@ Run: `make test` (stdlib `unittest`; `pytest` also discovers the tests). 40 test
 A Playwright script exercised the UI end to end during development (anonymous chat → sign-up → request → provider edit → admin approval). It is not part of the repository's CI; add it if you want UI regression coverage.
 
 ## Not covered by automated tests
-PostgreSQL, Cognito, S3, Bedrock, OpenSearch, Textract, live website fetching, ECS job runner, Terraform apply. Use the `docker compose --profile pg` stack for PostgreSQL and a sandbox AWS account for the rest.
+Live Cognito, S3, Bedrock, OpenSearch, Textract, live data/website fetching, real ECS RunTask and Terraform apply remain unverified. PostgreSQL import/idempotence, edits, approvals, concurrency, migrations and new-connection persistence are tested. Docker image build and Terraform validate were executed locally. An actual database-container restart is verified separately with scripts/verify_postgres_restart.py; record that result in integration-status.md after completion.
+
+`test_reliability.py` covers concurrent decisions, stale/invalid approval rollback, flags migration, missing-phone baselines, typed AI proposals, first-password/MFA response sessions, role assignment, persisted ECS launch failures, parent-cascade isolation, existing public IDs and failed-run cleanup. `test_postgres.py` repeats key invariants against isolated PostgreSQL schemas. Supplied NDP samples retain twenty usable sources with seven quarantined objects across six partial records; both count systems must balance.
 
 ## Evaluation caveat
 The maintenance evaluation uses synthetic pages written in the extractor's own vocabulary. It guards against regressions but is not evidence of real-world accuracy. Build a labelled set from real pages before relying on the numbers.

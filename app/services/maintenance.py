@@ -11,6 +11,7 @@ comparator, worker) replaces the former inline rule comparison.
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from app.db import Database, dumps, loads, new_id, now_iso
@@ -41,7 +42,7 @@ class MaintenanceService:
         self._site = WebsiteSourceAdapter(website)
         # The grounded Bedrock extractor runs only when a real (non-mock) LLM is configured;
         # otherwise the offline rule extractor supplies facts, so tests and the demo need no model.
-        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker()
+        self._invoke = None if getattr(llm, "is_mock", True) else BedrockInvoker(model_id=settings.bedrock_model_id)
         self._rule_facts = None if not getattr(llm, "is_mock", True) else _RuleFactSource(extractor)
         self.reports = ReportService(db)
 
@@ -75,13 +76,15 @@ class MaintenanceService:
     def due_services(self, limit: int | None = None) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self.s.maintenance_recheck_days)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         rows = self.db.q("SELECT r.id FROM resource r LEFT JOIN check_result c ON c.resource_id=r.id "
-                         "WHERE r.type='service' AND r.deleted=0 AND (c.checked_at IS NULL OR c.checked_at < ?) "
+                         "WHERE r.type='service' AND r.deleted=0 AND (c.checked_at IS NULL OR c.checked_at < ? "
+                         "OR c.record_version IS NULL OR c.record_version<>r.version) "
                          "ORDER BY COALESCE(c.checked_at,'') ASC, r.id", (cutoff,))
         ids = [r["id"] for r in rows][: limit or None]
         return [self.store.get(i) for i in ids]
 
     def run(self, scope: str = "all", service_id: str | None = None, trigger: str = "scheduled",
-            initiated_by: str = "scheduler", limit: int | None = None, force: bool = False) -> dict:
+            initiated_by: str = "scheduler", limit: int | None = None, force: bool = False,
+            job_id: str | None = None) -> dict:
         run_id = new_id()
         self.db.run("INSERT INTO maintenance_run (id,scope,trigger,initiated_by,started_at,status) VALUES (?,?,?,?,?,'running')",
                     (run_id, scope if scope == "all" else f"service:{service_id}", trigger, initiated_by, now_iso()))
@@ -89,7 +92,8 @@ class MaintenanceService:
         # A scheduled run with no explicit limit self-sizes from the source count so every
         # source is reviewed within the window. An explicit limit (e.g. an admin one-off) wins.
         batch = self.daily_batch()
-        effective_limit = limit if limit is not None else (batch or None)
+        # Manual/bootstrap checks drain the corpus backlog; periodic checks retain the daily budget.
+        effective_limit = limit if limit is not None else (self.active_source_count() if trigger == "manual" else batch)
         if scope == "service":
             row = self.store.get(service_id)
             rows = [row] if row and row["type"] == "service" else []
@@ -106,31 +110,66 @@ class MaintenanceService:
         # batch_target is the self-sized cap on the due-by-age slice. `checked` may exceed it,
         # because user-reported records are always added on top, and a force run ignores it.
         counts = {c: 0 for c in CATEGORIES} | {"checked": 0, "proposals": 0, "skipped_unchanged": 0,
-                                               "user_reported": 0, "batch_target": effective_limit or 0}
+                                               "user_reported": 0, "batch_target": effective_limit or 0,
+                                               "target": len(rows[:limit] if limit is not None else rows)}
+        self._progress(run_id, counts, job_id)
         cache: dict[str, object] = {}
-        for row in rows:
-            # A reported record is selected for this run and always flagged for a human, but it
-            # still respects the hash-skip: the AI re-reviews only if the page changed since the
-            # last review. A person looks because a person flagged it, not because the AI did.
-            row_reported = row["id"] in reported
-            out = self.check_service(row, cache, run_id, force, reported=row_reported)
-            counts["checked"] += 1
-            if out.get("flagged"):
-                counts["user_reported"] += 1
-            if out.get("skipped"):
-                counts["skipped_unchanged"] += 1
+        selected = rows[:limit] if limit is not None else rows
+        # Sample evidence allows a small bounded pool; live websites retain per-host serial fetching.
+        concurrency = min(4, max(1, self.s.maintenance_concurrency)) if self.s.website_backend == "sample" else 1
+        def check(row):
+            return self.check_service(row, cache, run_id, force, reported=row["id"] in reported)
+        def outcomes():
+            if concurrency == 1:
+                for row in selected:
+                    yield check(row)
             else:
-                counts[out["category"]] += 1
-                counts["proposals"] += out["proposals"]
+                with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                    futures = [pool.submit(check, row) for row in selected]
+                    for future in as_completed(futures):
+                        yield future.result()
+        try:
+            for out in outcomes():
+                # A reported record is selected for this run and always flagged for a human, but it
+                # still respects the hash-skip: the AI re-reviews only if the page changed since the
+                # last review. A person looks because a person flagged it, not because the AI did.
+                counts["checked"] += 1
+                if out.get("flagged"):
+                    counts["user_reported"] += 1
+                if out.get("skipped"):
+                    counts["skipped_unchanged"] += 1
+                else:
+                    counts[out["category"]] += 1
+                    counts["proposals"] += out["proposals"]
+                self._progress(run_id, counts, job_id)
+        except Exception as error:
+            self.db.run("UPDATE maintenance_run SET finished_at=?,status='failed',counts=? WHERE id=?",
+                        (now_iso(), dumps(counts | {"error": type(error).__name__}), run_id))
+            raise
         self.db.run("UPDATE maintenance_run SET finished_at=?, status='completed', counts=? WHERE id=?", (now_iso(), dumps(counts), run_id))
         return {"run_id": run_id, **counts}
+
+    def _progress(self, run_id, counts, job_id):
+        self.db.run("UPDATE maintenance_run SET counts=? WHERE id=?", (dumps(counts), run_id))
+        if job_id:
+            self.db.run("UPDATE job_run SET result=? WHERE id=?", (dumps({"run_id": run_id, **counts}), job_id))
 
     # ---- one record -----------------------------------------------------------------------------
     def _context(self, svc: dict):
         org = self.store.get(svc["org_id"]) if svc["org_id"] else None
         sals = [r for r in self.db.q("SELECT data FROM resource WHERE type='service_at_location' AND deleted=0 AND org_id=?", (svc["org_id"],))
                 if loads(r["data"]).get("service_id") == svc["id"]]
-        locs = [x["data"] for x in self.store.get_many([loads(r["data"])["location_id"] for r in sals]).values()]
+        locations = self.store.get_many([loads(r["data"])["location_id"] for r in sals])
+        locs = []
+        for sal in sals:
+            link = loads(sal["data"])
+            location = locations.get(link["location_id"])
+            if location:
+                loc = dict(location["data"])
+                for field in ("schedules", "phones", "accessibility"):
+                    if link.get(field):
+                        loc[field] = list(loc.get(field, [])) + list(link[field])
+                locs.append(loc)
         return org, locs
 
     def _prior_entry(self, svc: dict) -> CheckLogEntry | None:
@@ -145,7 +184,8 @@ class MaintenanceService:
         # the engine's content_hash; record_version pins the record the review ran against.
         if prior.get("page_hash") and prior.get("record_version") is not None:
             entry.content_hash = prior["page_hash"]
-            entry.record_hash = _record_marker(prior["record_version"])
+            entry.record_hash = prior.get("record_hash") or (
+                _record_marker(prior["record_version"]) if self._rule_facts is not None else None)
             entry.reviewed_category = _category_or_none(prior["category"])
             entry.reviewed_at = prior["checked_at"]
         entry.fetch_failed = prior["category"] in ("actively_bad", "check_failed")
@@ -201,24 +241,27 @@ class MaintenanceService:
                 n += 1
         summary = _summarize(comparison)
         page_hash = entry.content_hash if entry.reviewed_category is not None else None
-        return self._record_result(svc, comparison.category.value, summary, url, run_id, page_hash, svc["version"], n, flags=flags)
+        return self._record_result(svc, comparison.category.value, summary, url, run_id, page_hash, svc["version"], n,
+                                   flags=flags, record_hash=entry.record_hash)
 
     # ---- persistence ----------------------------------------------------------------------------
-    def _record_result(self, svc, category, summary, url, run_id, page_hash, record_version, n, flags=None) -> dict:
+    def _record_result(self, svc, category, summary, url, run_id, page_hash, record_version, n, flags=None,
+                       record_hash=None) -> dict:
         model = self._model_name()
         flags_json = dumps(flags) if flags else None
-        self.db.run("INSERT INTO check_result (resource_id,resource_type,org_id,category,summary,url,checked_at,run_id,model,verified_marker,page_hash,record_version,flags) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET category=excluded.category, "
+        self.db.run("INSERT INTO check_result (resource_id,resource_type,org_id,category,summary,url,checked_at,run_id,model,verified_marker,page_hash,record_version,flags,record_hash) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET category=excluded.category, "
                     "summary=excluded.summary, url=excluded.url, checked_at=excluded.checked_at, run_id=excluded.run_id, "
-                    "model=excluded.model, verified_marker=excluded.verified_marker, page_hash=excluded.page_hash, record_version=excluded.record_version, flags=excluded.flags",
+                    "model=excluded.model, verified_marker=excluded.verified_marker, page_hash=excluded.page_hash, record_version=excluded.record_version, flags=excluded.flags,record_hash=excluded.record_hash",
                     (svc["id"], "service", svc["org_id"], category, summary, url, now_iso(), run_id, model,
-                     1 if category == "verified" else 0, page_hash, record_version, flags_json))
+                     1 if category == "verified" else 0, page_hash, record_version, flags_json,record_hash))
         self.store.set_extension(svc["id"], "last_check", {"category": category, "checked_at": now_iso()})
         return {"category": category, "proposals": n, "summary": summary, "flagged": bool(flags)}
 
     def _finish(self, svc, category, summary, url, run_id, page_hash, record_version, flags=None) -> dict:
         """Backwards-compatible finish for the no-website / setup-error paths (no findings)."""
-        return self._record_result(svc, category, summary, url, run_id, page_hash, record_version, 0, flags=flags)
+        return self._record_result(svc, category, summary, url, run_id, page_hash,
+                                   svc["version"] if record_version is None else record_version, 0, flags=flags)
 
     def _model_name(self) -> str:
         return getattr(self.extractor, "name", "rules") if self.llm.is_mock else (self.s.bedrock_model_id or "bedrock")

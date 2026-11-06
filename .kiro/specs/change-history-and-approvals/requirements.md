@@ -12,3 +12,5 @@ As an admin, I approve every change before it goes live and can see who changed 
 4. WHEN an admin approves a change request THE SYSTEM SHALL apply it, attribute it to the proposer and record the approver.
 5. IF the record changed after a proposal was made THEN THE SYSTEM SHALL block approval until the admin confirms applying anyway.
 6. WHEN an admin edits a record directly THE SYSTEM SHALL validate it against HSDS on save and SHALL record history.
+7. WHEN concurrent decisions target the same pending request THE SYSTEM SHALL permit one decision only; decision, stale check, resource write and history SHALL share one transaction.
+8. WHEN an expected resource version differs from the current version THE SYSTEM SHALL return a conflict and SHALL save neither the edit nor a decision/history side effect.

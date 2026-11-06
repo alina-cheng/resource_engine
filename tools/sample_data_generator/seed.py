@@ -1,5 +1,10 @@
 """Loads a ready-to-demo environment: imports the generated data, creates demo users, policy documents,
-help requests, API keys and an initial maintenance run."""
+help requests, API keys and an initial maintenance run.
+
+Safe to run again: existing users, profiles, requests, documents and reports are kept. Outside local mode:
+- demo logins are also created in Cognito, with permanent passwords and no invitation email;
+- no API keys are created, because their only copy would end up in the job logs (create them in the admin console);
+- maintenance with a real model runs only when given an explicit limit, so a seed cannot start an unbounded model run."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -25,10 +30,18 @@ def _service_of(c, org_id):
 
 
 def _user(c, email, name, role, pw, org_id=None):
-    return c.users.by_email(email) or c.users.create(email, name, role, pw, org_id)
+    cognito = c.auth.mode == "cognito"
+    if cognito:
+        c.auth.ensure_demo_login(email, name, role, pw)
+    u = c.users.by_email(email)
+    if not u:
+        return c.users.create(email, name, role, None if cognito else pw, org_id)
+    if org_id and not u.get("org_id"):
+        c.users.set_org(u["id"], org_id)
+    return c.users.by_email(email)
 
 
-def seed_demo(c, run_maintenance: bool = True) -> dict:
+def seed_demo(c, run_maintenance: bool = True, maintenance_limit: int | None = None) -> dict:
     out: dict = {"credentials": {}}
     if c.store.counts().get("service", 0) == 0:
         out["import"] = c.ingest_all("seed", "seed-demo")
@@ -45,8 +58,9 @@ def seed_demo(c, run_maintenance: bool = True) -> dict:
                ("lena@demo.org", "Lena Park", "94063", "Looking for low-cost health care", True)]
     for email, name, zip_, need, share in seekers:
         u = _user(c, email, name, "seeker", "demo-seeker-1")
-        c.seekers.save_profile(u["id"], {"zip": zip_, "household_size": 3, "language": "English", "needs": need, "share_with_providers": share,
-                                         "contact_preference": "email"})
+        if not c.seekers.get_profile(u["id"]):
+            c.seekers.save_profile(u["id"], {"zip": zip_, "household_size": 3, "language": "English", "needs": need, "share_with_providers": share,
+                                             "contact_preference": "email"})
     out["credentials"]["seeker"] = CREDS["seeker"]
     # requests: one direct to the diaper bank (open), one unassigned, one already served
     if not c.db.one("SELECT 1 AS x FROM help_request LIMIT 1"):
@@ -70,7 +84,7 @@ def seed_demo(c, run_maintenance: bool = True) -> dict:
                 c.documents.upload(filename=p.name, data=p.read_bytes(), title=m["title"], uploaded_by="seed-demo", org_id=o["id"],
                                    effective_date=m["effective_date"], auto_approve=True)
     # API keys
-    if not c.db.one("SELECT 1 AS x FROM api_key LIMIT 1"):
+    if c.settings.env == "local" and not c.db.one("SELECT 1 AS x FROM api_key LIMIT 1"):
         for name, scope in (("Demo key (all sources)", None), ("Demo key (ODRS only)", "odrs")):
             key = new_api_key()
             c.db.run("INSERT INTO api_key (id,name,key_hash,key_prefix,source_scope,created_by,created_at) VALUES (?,?,?,?,?,?,?)",
@@ -92,6 +106,10 @@ def seed_demo(c, run_maintenance: bool = True) -> dict:
             u = c.users.by_email(email)
             if svc and u:
                 c.maintenance.reports.file(svc["id"], reporter_id=u["id"], reporter_email=u["email"], note=note)
-    if run_maintenance:
+    if run_maintenance and maintenance_limit is not None:
+        out["maintenance"] = c.maintenance.run(scope="all", trigger="seed", initiated_by="seed-demo", limit=maintenance_limit)
+    elif run_maintenance and c.settings.llm_backend == "mock":
         out["maintenance"] = c.maintenance.run(scope="all", trigger="seed", initiated_by="seed-demo", force=True)
+    elif run_maintenance:
+        out["maintenance"] = {"skipped": "A real model needs an explicit limit: seed-demo --limit <n>."}
     return out

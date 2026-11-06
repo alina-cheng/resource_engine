@@ -70,7 +70,7 @@ CREATE INDEX IF NOT EXISTS ix_cr_status ON change_request(status, kind);
 CREATE TABLE IF NOT EXISTS check_result (
   resource_id TEXT PRIMARY KEY, resource_type TEXT NOT NULL, org_id TEXT, category TEXT NOT NULL,
   summary TEXT, url TEXT, checked_at TEXT NOT NULL, run_id TEXT, model TEXT, verified_marker INTEGER DEFAULT 0,
-  page_hash TEXT, record_version INTEGER, flags TEXT);
+  page_hash TEXT, record_version INTEGER, flags TEXT, record_hash TEXT);
 CREATE TABLE IF NOT EXISTS user_report (
   id TEXT PRIMARY KEY, resource_id TEXT NOT NULL, reporter_id TEXT, reporter_email TEXT, note TEXT,
   created_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', resolved_by TEXT, resolved_at TEXT, run_id TEXT);
@@ -101,6 +101,10 @@ CREATE INDEX IF NOT EXISTS ix_chunk_doc ON doc_chunk(document_id);
 CREATE TABLE IF NOT EXISTS api_key (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_prefix TEXT NOT NULL,
   source_scope TEXT, created_by TEXT, created_at TEXT NOT NULL, revoked_at TEXT, last_used_at TEXT);
+CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS job_run (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, params TEXT NOT NULL,
+  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, task_arn TEXT, result TEXT, error TEXT);
 """
 
 
@@ -150,12 +154,19 @@ class Database:
 
     def init_schema(self) -> None:
         with self.tx() as t:
+            if self.kind == "postgres":
+                t.run("SELECT pg_advisory_xact_lock(727274)")
             for stmt in [s.strip() for s in DDL.split(";") if s.strip()]:
                 t.run(stmt)
+            from app.migrations import migrate
+            migrate(t)
 
     @contextmanager
     def tx(self) -> Iterator["Tx"]:
         with self._conn() as c:
+            if self.kind == "sqlite":
+                # Claim the write transaction before reading a decision's baseline.
+                c.execute("BEGIN IMMEDIATE")
             t = Tx(self, c)
             try:
                 yield t
@@ -173,9 +184,9 @@ class Database:
         with self.tx() as t:
             return t.one(sql, params)
 
-    def run(self, sql: str, params: Iterable = ()) -> None:
+    def run(self, sql: str, params: Iterable = ()) -> int:
         with self.tx() as t:
-            t.run(sql, params)
+            return t.run(sql, params)
 
 
 class Tx:
@@ -195,5 +206,5 @@ class Tx:
         rows = self.q(sql, params)
         return rows[0] if rows else None
 
-    def run(self, sql: str, params: Iterable = ()) -> None:
-        self._exec(sql, params)
+    def run(self, sql: str, params: Iterable = ()) -> int:
+        return self._exec(sql, params).rowcount
