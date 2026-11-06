@@ -25,7 +25,7 @@ variable "certificate_arn"  {
   description = "ACM certificate for HTTPS. Empty = HTTP only (demo)."
   default     = ""
 }
-variable "bedrock_model_id" { default = "anthropic.claude-haiku-5-5" }
+variable "bedrock_model_id" { default = "us.anthropic.claude-haiku-5-5" }
 variable "llm_backend"      { default = "bedrock" }
 variable "website_backend"  { default = "live" }
 variable "enable_opensearch" { default = false }
